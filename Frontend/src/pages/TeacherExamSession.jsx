@@ -1,14 +1,15 @@
-// TeacherExamSession.jsx - FIXED VIDEO STREAMING
+// TeacherExamSession.jsx - WITH CHAT FEATURE
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import api, { getJoinedStudents, startExamSession, endExamSession } from '../lib/api';
+import api, { startExamSession, endExamSession } from '../lib/api';
 import './TeacherExamSession.css';
 
 export default function TeacherExamSession() {
   const { examId } = useParams();
   const navigate = useNavigate();
   
+  // State Management
   const [exam, setExam] = useState(null);
   const [students, setStudents] = useState([]);
   const [timeLeft, setTimeLeft] = useState(3600);
@@ -20,14 +21,105 @@ export default function TeacherExamSession() {
   const [studentStreams, setStudentStreams] = useState({});
   const [peerConnections, setPeerConnections] = useState({});
   
+  // ✅ NEW: Chat State
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [showChat, setShowChat] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Refs
   const timerRef = useRef(null);
   const videoRefs = useRef({});
-  const streamTimeouts = useRef({});
-  const playAttempts = useRef({});
   const socketRef = useRef(null);
-  const activeConnections = useRef(new Set()); // ✅ TRACK ACTIVE CONNECTIONS
+  const activeConnections = useRef(new Set());
+  const messagesEndRef = useRef(null);
 
-  // ✅ FIXED: Initialize Socket.io
+  // ==================== UTILITY FUNCTIONS ====================
+  const getAvatarColor = (index) => {
+    const colors = [
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+      '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
+    ];
+    return colors[index % colors.length];
+  };
+
+  const getSafeStudentId = (student) => {
+    if (!student) return 'N/A';
+    const studentId = student.studentId || student._id || student.socketId || 'Unknown';
+    return String(studentId).substring(0, 8);
+  };
+
+  const getSafeStudentName = (student) => {
+    if (!student) return 'Unknown Student';
+    const name = student.name || student.studentName || `Student ${getSafeStudentId(student)}`;
+    return String(name);
+  };
+
+  const isSocketConnected = () => {
+    return socketRef.current && socketRef.current.connected;
+  };
+
+  const formatTime = (seconds) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // ==================== CHAT FUNCTIONS ====================
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !socketRef.current) return;
+
+    const messageData = {
+      id: Date.now().toString(),
+      text: newMessage.trim(),
+      sender: 'teacher',
+      senderName: 'Teacher',
+      timestamp: new Date(),
+      type: 'broadcast'
+    };
+
+    // Send to all students
+    socketRef.current.emit('send-chat-message', {
+      roomId: `exam-${examId}`,
+      message: messageData
+    });
+
+    // Add to local messages
+    setMessages(prev => [...prev, messageData]);
+    setNewMessage('');
+  };
+
+  const handleChatMessage = (data) => {
+    console.log('💬 Received chat message:', data);
+    const newMessage = {
+      ...data.message,
+      timestamp: new Date(data.message.timestamp)
+    };
+    
+    setMessages(prev => [...prev, newMessage]);
+    
+    // Increment unread count if chat is closed
+    if (!showChat) {
+      setUnreadCount(prev => prev + 1);
+    }
+  };
+
+  const toggleChat = () => {
+    setShowChat(prev => {
+      if (!prev) {
+        setUnreadCount(0); // Reset unread count when opening chat
+      }
+      return !prev;
+    });
+  };
+
+  // ==================== SOCKET.IO SETUP ====================
   useEffect(() => {
     const token = localStorage.getItem('token');
     
@@ -41,20 +133,14 @@ export default function TeacherExamSession() {
     setSocketStatus('connecting');
 
     const newSocket = io('http://localhost:3000', {
-      auth: { 
-        token: token 
-      },
-      query: { 
-        examId: examId, 
-        userRole: 'teacher' 
-      },
+      auth: { token: token },
+      query: { examId: examId, userRole: 'teacher' },
       transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-      timeout: 20000
+      timeout: 10000,
+      forceNew: true
     });
 
+    // Socket Event Handlers
     newSocket.on('connect', () => {
       console.log('✅ Teacher Socket connected successfully with ID:', newSocket.id);
       setSocketStatus('connected');
@@ -77,7 +163,7 @@ export default function TeacherExamSession() {
       setSocketStatus('disconnected');
     });
 
-    // Socket event listeners
+    // Application Event Handlers
     newSocket.on('student-joined', handleStudentJoined);
     newSocket.on('student-left', handleStudentLeft);
     newSocket.on('room-participants', handleRoomParticipants);
@@ -85,6 +171,9 @@ export default function TeacherExamSession() {
     newSocket.on('webrtc-answer', handleWebRTCAnswer);
     newSocket.on('ice-candidate', handleICECandidate);
     newSocket.on('camera-response', handleCameraResponse);
+    
+    // ✅ NEW: Chat Event Handler
+    newSocket.on('chat-message', handleChatMessage);
 
     setSocket(newSocket);
     socketRef.current = newSocket;
@@ -97,125 +186,302 @@ export default function TeacherExamSession() {
         socketRef.current.close();
         socketRef.current = null;
       }
-      
       cleanupAllConnections();
     };
   }, [examId]);
-const enableAllVideos = () => {
-  console.log('🎮 User gesture detected, enabling all videos');
-  Object.values(videoRefs.current).forEach(videoElement => {
-    if (videoElement && videoElement.srcObject) {
-      videoElement.play().catch(e => console.log('Gesture play failed:', e.name));
-    }
-  });
-};
-  // ✅ NEW: Clean up all connections
-  const cleanupAllConnections = () => {
-    console.log('🧹 Cleaning up ALL connections');
+
+  // ==================== WEBRTC HANDLERS ====================
+  const handleWebRTCOffer = async (data) => {
+    console.log('🎯 Received WebRTC offer from:', data.from);
     
-    // Clean up all peer connections
-    Object.values(peerConnections).forEach(pc => {
-      if (pc && typeof pc.close === 'function') {
-        try {
-          pc.close();
-        } catch (error) {
-          console.warn('Error closing peer connection:', error);
+    // Clean up existing connection
+    if (peerConnections[data.from]) {
+      cleanupStudentConnection(data.from);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    try {
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' }
+        ]
+      });
+
+      let streamReceived = false;
+      
+      peerConnection.ontrack = (event) => {
+        console.log('📹 ontrack event fired for:', data.from);
+        
+        if (event.streams && event.streams.length > 0 && !streamReceived) {
+          streamReceived = true;
+          const stream = event.streams[0];
+          
+          console.log('🎬 Stream received with tracks:', {
+            videoTracks: stream.getVideoTracks().length,
+            audioTracks: stream.getAudioTracks().length,
+            streamActive: stream.active
+          });
+
+          setStudentStreams(prev => ({
+            ...prev,
+            [data.from]: stream
+          }));
+
+          setStudents(prev => prev.map(student => 
+            student.socketId === data.from 
+              ? { ...student, cameraEnabled: true }
+              : student
+          ));
+
+          setTimeout(() => {
+            const videoElement = videoRefs.current[data.from];
+            if (videoElement && stream.active) {
+              console.log('🎬 Setting up video for:', data.from);
+              
+              videoElement.srcObject = null;
+              videoElement.srcObject = stream;
+              videoElement.muted = true;
+              videoElement.playsInline = true;
+              
+              const forcePlay = async (attempt = 0) => {
+                try {
+                  await videoElement.play();
+                  console.log('✅ Video playing successfully!');
+                } catch (error) {
+                  console.log(`⚠️ Play attempt ${attempt + 1} failed:`, error.name);
+                  if (attempt < 10) {
+                    setTimeout(() => forcePlay(attempt + 1), 200);
+                  }
+                }
+              };
+              
+              forcePlay();
+            }
+          }, 100);
+        }
+      };
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate && socketRef.current) {
+          socketRef.current.emit('ice-candidate', {
+            target: data.from,
+            candidate: event.candidate
+          });
+        }
+      };
+
+      setPeerConnections(prev => ({
+        ...prev,
+        [data.from]: peerConnection
+      }));
+
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+      console.log('✅ Remote description set');
+      
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      console.log('✅ Answer created');
+
+      if (socketRef.current) {
+        socketRef.current.emit('webrtc-answer', {
+          target: data.from,
+          answer: answer
+        });
+        console.log('✅ Sent WebRTC answer to student');
+      }
+
+    } catch (error) {
+      console.error('❌ Error handling WebRTC offer:', error);
+      cleanupStudentConnection(data.from);
+    }
+  };
+
+  const handleICECandidate = async (data) => {
+    const peerConnection = peerConnections[data.from];
+    if (peerConnection && data.candidate) {
+      try {
+        if (data.candidate.candidate && data.candidate.sdpMid !== null) {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+      } catch (error) {
+        console.error('❌ Error adding ICE candidate:', error);
+      }
+    }
+  };
+
+  const handleWebRTCAnswer = async (data) => {
+    const peerConnection = peerConnections[data.from];
+    if (peerConnection) {
+      try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        console.log('✅ Set remote description from answer for:', data.from);
+      } catch (error) {
+        console.error('❌ Error setting remote description from answer:', error);
+      }
+    }
+  };
+
+  // ==================== VIDEO MANAGEMENT ====================
+  const setupVideoElement = (socketId, stream) => {
+    const videoElement = videoRefs.current[socketId];
+    if (!videoElement || !stream) {
+      console.log('❌ Video element or stream not found for:', socketId);
+      return;
+    }
+
+    console.log('🎬 Setting up video for:', socketId);
+
+    videoElement.style.transform = 'scaleX(-1)';
+    videoElement.srcObject = null;
+    videoElement.srcObject = stream;
+    videoElement.muted = true;
+    videoElement.playsInline = true;
+    
+    const playWithRetry = async (attempt = 0) => {
+      try {
+        await videoElement.play();
+        console.log('✅ Video playing successfully on attempt:', attempt + 1);
+      } catch (error) {
+        console.log(`⚠️ Play attempt ${attempt + 1} failed:`, error.name);
+        if (attempt < 5) {
+          setTimeout(() => playWithRetry(attempt + 1), 300);
         }
       }
-    });
+    };
     
-    // Clean up all streams
-    Object.values(studentStreams).forEach(stream => {
-      if (stream && stream.getTracks) {
-        stream.getTracks().forEach(track => {
-          try {
-            track.stop();
-          } catch (error) {
-            console.warn('Error stopping track:', error);
-          }
-        });
-      }
-    });
-    
-    // Clean up all video elements
-    Object.values(videoRefs.current).forEach(videoElement => {
-      if (videoElement) {
-        videoElement.srcObject = null;
-        videoElement.load();
-      }
-    });
-    
-    // Clear all timeouts
-    Object.values(streamTimeouts.current).forEach(timeout => {
-      if (timeout) clearTimeout(timeout);
-    });
-    Object.values(playAttempts.current).forEach(timeout => {
-      if (timeout) clearTimeout(timeout);
-    });
-    
-    // Clear active connections
-    activeConnections.current.clear();
+    playWithRetry();
   };
 
-  // Handle room participants
-  const handleRoomParticipants = (data) => {
-    console.log('👥 Room participants:', data);
-    if (data.students && data.students.length > 0) {
-      const formattedStudents = data.students.map(student => ({
-        studentId: student.studentId,
-        name: student.studentName,
-        email: student.studentEmail || '',
-        socketId: student.socketId,
-        joinedAt: student.joinedAt || new Date(),
-        cameraEnabled: student.cameraEnabled || false,
-        _id: student.studentId || student.socketId
-      }));
+  const setVideoRef = (socketId, element) => {
+    if (element) {
+      videoRefs.current[socketId] = element;
       
-      setStudents(formattedStudents);
+      const stream = studentStreams[socketId];
+      if (stream && element.srcObject !== stream) {
+        console.log('🎬 Setting existing stream for student:', socketId);
+        setupVideoElement(socketId, stream);
+      }
     }
   };
 
-  // Handle student joining
+  // ==================== STUDENT MANAGEMENT ====================
   const handleStudentJoined = (data) => {
     console.log('🎯 Student joined:', data);
     
     setStudents(prev => {
-      const exists = prev.find(s => 
-        s.studentId === data.studentId || s.socketId === data.socketId
-      );
+      const exists = prev.find(s => s.socketId === data.socketId);
       if (!exists) {
         return [...prev, {
-          studentId: data.studentId,
-          name: data.studentName,
-          email: data.studentEmail || '',
+          studentId: String(data.studentId || data.socketId),
+          name: String(data.studentName || 'Student'),
+          email: String(data.studentEmail || ''),
           socketId: data.socketId,
-          joinedAt: data.joinedAt || new Date(),
+          joinedAt: new Date(),
           cameraEnabled: false,
-          _id: data.studentId || data.socketId
+          _id: String(data.studentId || data.socketId),
+          isConnected: true,
+          connectionStatus: 'connected',
+          lastSeen: new Date()
         }];
       }
-      return prev;
+      return prev.map(student => 
+        student.socketId === data.socketId 
+          ? { 
+              ...student, 
+              isConnected: true,
+              connectionStatus: 'connected',
+              lastSeen: new Date()
+            }
+          : student
+      );
     });
 
-    // Request camera after student joins with delay
+    // Request camera after student joins
     setTimeout(() => {
       requestStudentCamera(data.socketId);
     }, 1000);
   };
 
-  // Handle student leaving
   const handleStudentLeft = (data) => {
     console.log('🚪 Student left:', data);
-    
-    setStudents(prev => prev.filter(student => student.socketId !== data.socketId));
+    setStudents(prev => prev.map(student => 
+      student.socketId === data.socketId 
+        ? { 
+            ...student, 
+            isConnected: false,
+            connectionStatus: 'disconnected',
+            cameraEnabled: false
+          }
+        : student
+    ));
     cleanupStudentConnection(data.socketId);
   };
 
-  // ✅ IMPROVED: Clean up student connection
+  const handleRoomParticipants = (data) => {
+    console.log('👥 Room participants:', data);
+    if (data.students && data.students.length > 0) {
+      const formattedStudents = data.students.map(student => ({
+        studentId: String(student.studentId || student.socketId),
+        name: String(student.studentName || 'Student'),
+        email: String(student.studentEmail || ''),
+        socketId: student.socketId,
+        joinedAt: new Date(),
+        cameraEnabled: false,
+        _id: String(student.studentId || student.socketId),
+        isConnected: true,
+        connectionStatus: 'connected',
+        lastSeen: new Date()
+      }));
+      setStudents(formattedStudents);
+
+      // Request cameras for all connected students
+      formattedStudents.forEach((student, index) => {
+        setTimeout(() => {
+          requestStudentCamera(student.socketId);
+        }, 2000 + (index * 1000));
+      });
+    }
+  };
+
+  const handleCameraResponse = (data) => {
+    console.log('📹 Camera response:', data);
+    setStudents(prev => prev.map(student => 
+      student.socketId === data.socketId 
+        ? { ...student, cameraEnabled: data.enabled }
+        : student
+    ));
+  };
+
+  // ==================== CAMERA REQUEST MANAGEMENT ====================
+  const requestStudentCamera = (studentSocketId) => {
+    if (!isSocketConnected() || !studentSocketId) {
+      console.warn('⚠️ Socket not connected for camera request');
+      return;
+    }
+
+    if (studentStreams[studentSocketId]) {
+      console.log('✅ Already have stream for:', studentSocketId);
+      return;
+    }
+
+    if (activeConnections.current.has(studentSocketId)) {
+      console.log('⏳ Already processing camera for:', studentSocketId);
+      return;
+    }
+
+    console.log('📹 Requesting camera from student:', studentSocketId);
+    activeConnections.current.add(studentSocketId);
+    
+    socketRef.current.emit('request-student-camera', {
+      studentSocketId: studentSocketId,
+      roomId: `exam-${examId}`
+    });
+  };
+
+  // ==================== CONNECTION CLEANUP ====================
   const cleanupStudentConnection = (socketId) => {
     console.log('🧹 Cleaning up connection for:', socketId);
     
-    // Remove from active connections
     activeConnections.current.delete(socketId);
     
     if (peerConnections[socketId]) {
@@ -225,7 +491,6 @@ const enableAllVideos = () => {
       } catch (error) {
         console.warn('Error closing peer connection:', error);
       }
-      
       setPeerConnections(prev => {
         const newPCs = { ...prev };
         delete newPCs[socketId];
@@ -255,308 +520,20 @@ const enableAllVideos = () => {
       const videoElement = videoRefs.current[socketId];
       if (videoElement) {
         videoElement.srcObject = null;
-        videoElement.load();
+        
+        
       }
       delete videoRefs.current[socketId];
     }
-    
-    if (streamTimeouts.current[socketId]) {
-      clearTimeout(streamTimeouts.current[socketId]);
-      delete streamTimeouts.current[socketId];
-    }
-    
-    if (playAttempts.current[socketId]) {
-      clearTimeout(playAttempts.current[socketId]);
-      delete playAttempts.current[socketId];
-    }
   };
 
-  // ✅ FIXED: Request camera with connection tracking
-// ✅ FIXED: PREVENT DUPLICATE CAMERA REQUESTS
-const requestStudentCamera = (studentSocketId) => {
-  if (!isSocketConnected() || !studentSocketId) {
-    console.warn('⚠️ Socket not connected for camera request');
-    return;
-  }
-
-  // ✅ BETTER DUPLICATE PREVENTION - Check if we already have a stream
-  if (studentStreams[studentSocketId]) {
-    console.log('✅ Already have stream for:', studentSocketId);
-    return;
-  }
-
-  // ✅ Check if we're already processing this student
-  if (activeConnections.current.has(studentSocketId)) {
-    console.log('⏳ Already processing camera for:', studentSocketId);
-    return;
-  }
-
-  console.log('📹 Requesting camera from student:', studentSocketId);
-  activeConnections.current.add(studentSocketId);
-  
-  socketRef.current.emit('request-student-camera', {
-    studentSocketId: studentSocketId,
-    roomId: `exam-${examId}`
-  });
-  
-  // ✅ CLEANER TIMEOUT HANDLING
-  if (streamTimeouts.current[studentSocketId]) {
-    clearTimeout(streamTimeouts.current[studentSocketId]);
-  }
-  
- // ✅ INCREASE TIMEOUT FOR BETTER CONNECTION
-streamTimeouts.current[studentSocketId] = setTimeout(() => {
-  console.log('🕒 Camera request timeout for:', studentSocketId);
-  activeConnections.current.delete(studentSocketId);
-  cleanupStudentConnection(studentSocketId);
-}, 30000); // ⬅️ Increased from 15000 to 30000 (30 seconds)
-};
-
-// ✅ FIXED: ALLOW NEW OFFERS EVEN IF CONNECTION EXISTS
-const handleWebRTCOffer = async (data) => {
-  console.log('🎯 Received WebRTC offer from:', data.from);
-  
-  // ✅ ALLOW RECONNECTION - Don't block if connection exists
-  // Clean up existing connection first
-  if (peerConnections[data.from]) {
-    console.log('🔄 Closing existing peer connection for:', data.from);
-    cleanupStudentConnection(data.from);
-    await new Promise(resolve => setTimeout(resolve, 500)); // Longer delay
-  }
-
-  // ✅ REMOVE the activeConnections check - allow new offers
-  activeConnections.current.add(data.from);
-
-  try {
-    const peerConnection = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    });
-
-    // ✅ FIXED: BETTER STREAM HANDLING IN ONTRACK
-peerConnection.ontrack = (event) => {
-  console.log('📹 Received track event from:', data.from);
-  
-  if (event.streams && event.streams.length > 0) {
-    const stream = event.streams[0];
-    console.log('🎬 Stream received - Tracks:', stream.getTracks().length);
-
-    // ✅ FORCE STREAM UPDATE
-    setStudentStreams(prev => {
-      const newStreams = { ...prev };
-      newStreams[data.from] = stream;
-      return newStreams;
-    });
-
-    // ✅ UPDATE STUDENT STATUS
-    setStudents(prev => prev.map(student => 
-      student.socketId === data.from 
-        ? { ...student, cameraEnabled: true }
-        : student
-    ));
-
-    // ✅ DELAYED VIDEO SETUP TO ENSURE COMPONENT UPDATE
-    setTimeout(() => {
-      const videoElement = videoRefs.current[data.from];
-      if (videoElement && stream) {
-        console.log('🎬 Final video setup for:', data.from);
-        
-        // Ensure clean setup
-        videoElement.srcObject = null;
-        videoElement.srcObject = stream;
-        videoElement.muted = true;
-        videoElement.playsInline = true;
-        videoElement.setAttribute('autoplay', 'true');
-        videoElement.setAttribute('muted', 'true');
-        
-        // Force play with multiple attempts
-        const attemptPlay = async (attempt = 0) => {
-          try {
-            await videoElement.play();
-            console.log('✅ Video playback successful on attempt:', attempt + 1);
-          } catch (error) {
-            console.log(`⚠️ Play attempt ${attempt + 1} failed:`, error.name);
-            if (attempt < 3) {
-              setTimeout(() => attemptPlay(attempt + 1), 500);
-            }
-          }
-        };
-        
-        attemptPlay();
-      }
-    }, 300);
-  }
-};
-
-    peerConnection.oniceconnectionstatechange = () => {
-      const state = peerConnection.iceConnectionState;
-      console.log('🧊 ICE connection state for', data.from, ':', state);
-      
-      if (state === 'connected' || state === 'completed') {
-        console.log('✅ WebRTC connected for:', data.from);
-      }
-      
-      if (state === 'failed' || state === 'disconnected') {
-        console.log('❌ WebRTC failed for:', data.from);
-        // Don't cleanup immediately, allow reconnection
-        setTimeout(() => {
-          if (peerConnection.iceConnectionState === 'failed') {
-            cleanupStudentConnection(data.from);
-          }
-        }, 3000);
-      }
-    };
-
-    // Store the connection
-    setPeerConnections(prev => ({
-      ...prev,
-      [data.from]: peerConnection
-    }));
-
-    // Process the offer
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-    console.log('✅ Remote description set for:', data.from);
-    
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    console.log('✅ Answer created for:', data.from);
-
-    // Send answer back
-    if (isSocketConnected()) {
-      socketRef.current.emit('webrtc-answer', {
-        target: data.from,
-        answer: answer
-      });
-      console.log('✅ Sent WebRTC answer to student:', data.from);
-    }
-
-  } catch (error) {
-    console.error('❌ Error handling WebRTC offer:', error);
-    activeConnections.current.delete(data.from);
-    cleanupStudentConnection(data.from);
-  }
-};
-
-
-
-// ✅ FIXED: VIDEO PLAYBACK WITH AUTOPLAY HANDLING
-const setVideoRef = (socketId, element) => {
-  if (element) {
-    videoRefs.current[socketId] = element;
-    
-    // If stream exists, set it up immediately
-    const stream = studentStreams[socketId];
-    if (stream && element.srcObject !== stream) {
-      console.log('🎬 Setting existing stream for student:', socketId);
-      element.srcObject = stream;
-      element.muted = true;
-      element.playsInline = true;
-      
-      // ✅ IMPROVED AUTOPLAY HANDLING
-      const playVideo = async () => {
-        try {
-          await element.play();
-          console.log('✅ Video playing successfully for:', socketId);
-        } catch (error) {
-          console.log('⚠️ Auto-play failed, will retry:', error.name);
-          
-          // ✅ RETRY WITH USER GESTURE
-          const handleUserInteraction = () => {
-            element.play().catch(e => console.log('Final play failed:', e.name));
-            document.removeEventListener('click', handleUserInteraction);
-            document.removeEventListener('touchstart', handleUserInteraction);
-          };
-          
-          document.addEventListener('click', handleUserInteraction);
-          document.addEventListener('touchstart', handleUserInteraction);
-        }
-      };
-      
-      playVideo();
-    }
-  } else {
-    // Remove reference when element unmounts
-    delete videoRefs.current[socketId];
-  }
-};
-      
-
-  // ✅ SIMPLIFIED: Video element setup
-  const setupVideoElement = (socketId, stream) => {
-    const videoElement = videoRefs.current[socketId];
-    if (!videoElement) {
-      console.log('❌ Video element not found for:', socketId);
-      return;
-    }
-
-    console.log('🎬 SIMPLIFIED Video setup for:', socketId);
-    
-    // Clear previous stream
-    videoElement.srcObject = null;
-    
-    // Simple setup - walang complex event listeners
-    videoElement.srcObject = stream;
-    videoElement.muted = true;
-    videoElement.playsInline = true;
-    
-    // Simple play attempt
-    const playVideo = async () => {
-      try {
-        await videoElement.play();
-        console.log('✅ Video playing for:', socketId);
-      } catch (error) {
-        console.log('⚠️ Auto-play failed, user interaction needed:', socketId);
-      }
-    };
-    
-    playVideo();
+  const cleanupAllConnections = () => {
+    console.log('🧹 Cleaning up ALL connections');
+    Object.keys(peerConnections).forEach(cleanupStudentConnection);
+    activeConnections.current.clear();
   };
 
-  // Handle WebRTC answer
-  const handleWebRTCAnswer = async (data) => {
-    const peerConnection = peerConnections[data.from];
-    if (peerConnection) {
-      try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-        console.log('✅ Set remote description from answer for:', data.from);
-      } catch (error) {
-        console.error('❌ Error setting remote description from answer:', error);
-      }
-    }
-  };
-
-  // Handle ICE candidate
-  const handleICECandidate = async (data) => {
-    const peerConnection = peerConnections[data.from];
-    if (peerConnection && data.candidate) {
-      try {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-      } catch (error) {
-        console.error('❌ Error adding ICE candidate:', error);
-      }
-    }
-  };
-
-  // Handle camera response
-  const handleCameraResponse = (data) => {
-    console.log('📹 Camera response:', data);
-    setStudents(prev => prev.map(student => 
-      student.socketId === data.socketId 
-        ? { ...student, cameraEnabled: data.enabled }
-        : student
-    ));
-  };
-
-  // ✅ FIXED: Video element reference handler
-  
-  // Socket connection checker
-  const isSocketConnected = () => {
-    return socketRef.current && socketRef.current.connected;
-  };
-
-  // Load exam data
+  // ==================== EXAM SESSION MANAGEMENT ====================
   useEffect(() => {
     const loadExamData = async () => {
       try {
@@ -576,8 +553,6 @@ const setVideoRef = (socketId, element) => {
           setSessionStarted(examResponse.data.isActive || false);
         }
         
-        await loadJoinedStudents();
-        
       } catch (error) {
         console.error('❌ Failed to load exam data:', error);
       } finally {
@@ -588,25 +563,6 @@ const setVideoRef = (socketId, element) => {
     loadExamData();
   }, [examId, navigate]);
 
-  // Load joined students
-  const loadJoinedStudents = async () => {
-    try {
-      const response = await getJoinedStudents(examId);
-      if (response.success) {
-        const studentsWithSocket = response.data.joinedStudents.map(student => ({
-          ...student,
-          socketId: null,
-          cameraEnabled: false,
-          _id: student._id || student.studentId
-        }));
-        setStudents(studentsWithSocket);
-      }
-    } catch (error) {
-      console.error('Failed to load joined students:', error);
-    }
-  };
-
-  // Start exam session
   const handleStartExam = async () => {
     try {
       const response = await startExamSession(examId);
@@ -615,13 +571,14 @@ const setVideoRef = (socketId, element) => {
         setIsTimerRunning(true);
         console.log('✅ Exam session started');
         
-        // Request camera from students with delays
-        students.forEach((student, index) => {
-          if (student.socketId) {
-            setTimeout(() => {
-              requestStudentCamera(student.socketId);
-            }, 1000 + (index * 1000));
-          }
+        // Request cameras for currently connected students
+        const connectedStudents = students.filter(student => student.socketId);
+        console.log(`📹 Requesting cameras from ${connectedStudents.length} connected students`);
+        
+        connectedStudents.forEach((student, index) => {
+          setTimeout(() => {
+            requestStudentCamera(student.socketId);
+          }, 1000 + (index * 1000));
         });
       }
     } catch (error) {
@@ -630,20 +587,18 @@ const setVideoRef = (socketId, element) => {
     }
   };
 
-  // End exam session
   const handleEndExam = async () => {
     try {
       cleanupAllConnections();
-      
-      setPeerConnections({});
-      setStudentStreams({});
-      videoRefs.current = {};
       
       const response = await endExamSession(examId);
       if (response.success) {
         setSessionStarted(false);
         setIsTimerRunning(false);
         setStudents([]);
+        setStudentStreams({});
+        setPeerConnections({});
+        setMessages([]);
       }
     } catch (error) {
       console.error('Failed to end exam:', error);
@@ -665,63 +620,151 @@ const setVideoRef = (socketId, element) => {
     };
   }, [isTimerRunning, timeLeft]);
 
-  const formatTime = (seconds) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-const renderStudentVideos = () => {
-  return students
-    .filter(student => student.socketId && studentStreams[student.socketId])
-    .map((student) => {
-      const socketId = student.socketId;
-      const stream = studentStreams[socketId];
-      const videoElement = videoRefs.current[socketId];
-      const isVideoPlaying = videoElement && 
-                            !videoElement.paused && 
-                            videoElement.readyState >= 3 &&
-                            videoElement.srcObject === stream;
-      
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // ==================== RENDER FUNCTIONS ====================
+  
+  // ✅ Only show connected students (those with socketId)
+  const connectedStudents = students.filter(student => student.socketId && student.isConnected);
+
+  const renderStudentVideos = () => {
+    const studentsWithStreams = connectedStudents
+      .filter(student => studentStreams[student.socketId])
+      .sort((a, b) => getSafeStudentName(a).localeCompare(getSafeStudentName(b)));
+
+    console.log('🎬 Rendering videos for connected students:', studentsWithStreams.length);
+
+    if (studentsWithStreams.length === 0) {
       return (
-        <div key={socketId} className="student-video-card">
-          <div className="video-container">
-          <video 
-  ref={(element) => setVideoRef(socketId, element)}
-  autoPlay 
-  muted
-  playsInline
-  className={`student-video ${isVideoPlaying ? 'playing' : 'loading'}`}
-  // ✅ ADD THESE ATTRIBUTES FOR BETTER AUTOPLAY SUPPORT
-  onLoadedMetadata={() => {
-    const video = videoRefs.current[socketId];
-    if (video) video.play().catch(e => console.log('Metadata play failed:', e.name));
-  }}
-/>
-            {!isVideoPlaying && (
-              <div className="video-loading-overlay">
-                <div className="loading-spinner-small"></div>
-                <span>Connecting camera...</span>
-              </div>
-            )}
-          </div>
-          <div className="video-info">
-            <div className="student-details">
-              <span className="student-name">{student?.name || 'Student'}</span>
-              {student && (
-                <span className="student-id">ID: {student.studentId?.substring(0, 8)}</span>
-              )}
+        <div className="no-videos">
+          <div className="empty-state">
+            <div className="camera-icon">📹</div>
+            <h4>No Active Cameras</h4>
+            <p>Student cameras will appear here when they join and grant camera access</p>
+            <div className="connection-stats">
+              <p><strong>Connection Status:</strong></p>
+              <p>Connected Students: {connectedStudents.length}</p>
+              <p>Active Cameras: {studentsWithStreams.length}</p>
             </div>
-            <span className={`camera-status ${isVideoPlaying ? 'live' : 'connecting'}`}>
-              {isVideoPlaying ? '📹 Live' : '📹 Connecting...'}
-            </span>
           </div>
         </div>
       );
-    });
-};
+    }
 
+    return (
+      <div className="video-grid-container">
+        <div className="grid-header">
+          <span>Live Student Cameras ({studentsWithStreams.length})</span>
+        </div>
+        
+        <div className="video-grid">
+          {studentsWithStreams.map((student, index) => {
+            const socketId = student.socketId;
+            const stream = studentStreams[socketId];
 
+            return (
+              <div key={socketId} className="student-video-card">
+                <div className="video-header">
+                  <span className="student-badge">#{index + 1}</span>
+                  <span className="student-name">{getSafeStudentName(student)}</span>
+                </div>
+                
+                <div className="video-container">
+                  <video 
+                    ref={(element) => setVideoRef(socketId, element)}
+                    autoPlay 
+                    muted
+                    playsInline
+                    className="student-video"
+                  />
+                  
+                  <div className="video-overlay-info">
+                    
+                  </div>
+                </div>
+                
+                <div className="video-footer">
+                  <div className="student-info-compact">
+                    <span className="student-id">ID: {getSafeStudentId(student)}</span>
+                    <span className="connection-type">🟢 Online</span>
+                  </div>
+                  <button 
+                    onClick={() => requestStudentCamera(socketId)}
+                    className="retry-camera-btn"
+                    title="Request camera again"
+                  >
+                    🔄
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // ✅ NEW: Render Chat Component
+  const renderChat = () => {
+    if (!showChat) return null;
+
+    return (
+      <div className="chat-panel">
+        <div className="chat-header">
+          <h3>💬 Exam Chat</h3>
+          <button className="close-chat-btn" onClick={toggleChat}>✕</button>
+        </div>
+        
+        <div className="chat-messages">
+          {messages.length === 0 ? (
+            <div className="no-messages">
+              <div className="chat-icon">💬</div>
+              <p>No messages yet</p>
+              <small>Start a conversation with students</small>
+            </div>
+          ) : (
+            messages.map((message) => (
+              <div key={message.id} className={`message ${message.sender === 'teacher' ? 'sent' : 'received'}`}>
+                <div className="message-header">
+                  <span className="sender-name">
+                    {message.sender === 'teacher' ? 'You' : message.senderName}
+                  </span>
+                  <span className="message-time">
+                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div className="message-content">
+                  {message.text}
+                </div>
+              </div>
+            ))
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+        
+        <form className="chat-input-form" onSubmit={handleSendMessage}>
+          <input
+            type="text"
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            placeholder="Type a message to all students..."
+            className="chat-input"
+            maxLength={500}
+          />
+          <button 
+            type="submit" 
+            className="send-message-btn"
+            disabled={!newMessage.trim()}
+          >
+            Send
+          </button>
+        </form>
+      </div>
+    );
+  };
 
   if (loading) {
     return (
@@ -750,7 +793,7 @@ const renderStudentVideos = () => {
             <span className="timer-text">{formatTime(timeLeft)}</span>
           </div>
           <div className="student-count">
-            👥 {students.length} Students
+            👥 {connectedStudents.length} Students Connected
           </div>
           <div className={`socket-status ${socketStatus}`}>
             {socketStatus === 'connected' && '🟢 Connected'}
@@ -759,7 +802,19 @@ const renderStudentVideos = () => {
             {socketStatus === 'disconnected' && '⚫ Disconnected'}
           </div>
         </div>
+        
         <div className="header-right">
+          {/* ✅ NEW: Chat Toggle Button */}
+          <button 
+            className={`chat-toggle-btn ${unreadCount > 0 ? 'has-unread' : ''}`}
+            onClick={toggleChat}
+          >
+            💬 Chat
+            {unreadCount > 0 && (
+              <span className="unread-badge">{unreadCount}</span>
+            )}
+          </button>
+          
           {!sessionStarted ? (
             <button className="start-exam-btn" onClick={handleStartExam}>
               🚀 Start Exam
@@ -774,65 +829,82 @@ const renderStudentVideos = () => {
 
       <div className="teacher-exam-content">
         <div className="videos-section">
-          <h3>Student Cameras ({Object.keys(studentStreams).length} Live)</h3>
-          <div className="video-grid">
-            {Object.keys(studentStreams).length > 0 ? (
-              renderStudentVideos()
-            ) : (
-              <div className="no-videos">
-                <p>No student cameras active</p>
-                <small>Student cameras will appear here when they join and grant permission</small>
-              </div>
-            )}
-          </div>
+          {renderStudentVideos()}
         </div>
 
         <div className="students-section">
           <div className="students-header">
-            <h3>Students ({students.length})</h3>
-            <button className="refresh-btn" onClick={loadJoinedStudents}>
-              🔄 Refresh
-            </button>
+            <h3>Connected Students ({connectedStudents.length})</h3>
+            <div className="student-stats">
+              <span className="stat cameras">
+                📹 {connectedStudents.filter(s => s.cameraEnabled).length} Active Cameras
+              </span>
+            </div>
           </div>
           
           <div className="students-list">
-            {students.length > 0 ? (
-              students.map((student) => (
-                <div key={student._id || student.socketId} className="student-card">
+            {connectedStudents.length > 0 ? (
+              connectedStudents.map((student, index) => (
+                <div key={student.socketId} className="student-card">
                   <div className="student-info">
-                    <div className="student-avatar">
-                      {student.name?.charAt(0).toUpperCase() || 'S'}
+                    <div className="student-avatar" style={{backgroundColor: getAvatarColor(index)}}>
+                      {getSafeStudentName(student).charAt(0).toUpperCase()}
                     </div>
                     <div className="student-details">
-                      <span className="student-name">{student.name || 'Student'}</span>
-                      <div className="student-status">
-                        <span className={`camera-indicator ${student.cameraEnabled ? 'active' : 'inactive'}`}>
-                          {student.cameraEnabled ? '📹 Camera On' : '📹 Camera Off'}
+                      <span className="student-name">{getSafeStudentName(student)}</span>
+                      <div className="student-meta">
+                        <span className="student-id">
+                          ID: {getSafeStudentId(student)}
                         </span>
-                        {student.socketId && (
-                          <span className="connection-status connected">✅ Online</span>
-                        )}
+                        <span className="join-time">
+                          Joined: {student.joinedAt.toLocaleTimeString()}
+                        </span>
                       </div>
                     </div>
                   </div>
-                  {student.socketId && !student.cameraEnabled && (
+                  <div className="student-status">
+                    <div className="connection-status-indicator">
+                      <span className={`status-dot ${student.connectionStatus}`}></span>
+                      <span className="status-text">
+                        {student.connectionStatus === 'connected' ? '🟢 Connected' : '🔴 Disconnected'}
+                      </span>
+                    </div>
+                    <span className={`camera-indicator ${student.cameraEnabled ? 'active' : 'inactive'}`}>
+                      {student.cameraEnabled ? '📹 Camera Live' : '📹 Camera Off'}
+                    </span>
+                  </div>
+                  {!student.cameraEnabled && (
                     <button 
                       className="request-camera-btn"
                       onClick={() => requestStudentCamera(student.socketId)}
-                      disabled={!isSocketConnected()}
                     >
-                      📹 Request Camera
+                      Request Camera
                     </button>
                   )}
                 </div>
               ))
             ) : (
               <div className="no-students">
-                <p>No students have joined yet</p>
+                <div className="empty-students">
+                  <div className="student-icon">👥</div>
+                  <h4>No Students Connected</h4>
+                  <p>Waiting for students to join the exam session...</p>
+                  <div className="connection-instructions">
+                    <p><strong>Students should:</strong></p>
+                    <ul>
+                      <li>Join using the exam code</li>
+                      <li>Grant camera permissions when prompted</li>
+                      <li>Stay connected throughout the exam</li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             )}
           </div>
         </div>
+
+        {/* ✅ NEW: Chat Panel */}
+        {renderChat()}
       </div>
     </div>
   );

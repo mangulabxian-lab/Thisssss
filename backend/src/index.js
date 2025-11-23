@@ -22,63 +22,35 @@ const server = http.createServer(app);
 const passport = require("passport");
 app.use(passport.initialize());
 
-// ===== SOCKET.IO SETUP WITH PROPER CORS =====
-// ✅ IMPROVED: server.js socket configuration
+// ===== SOCKET.IO SETUP =====
 const io = new Server(server, {
   cors: {
     origin: [
       "http://localhost:5173",
       "http://127.0.0.1:5173",
       "http://localhost:3000"
-    ], // ✅ Multiple origins
+    ],
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Authorization", "Content-Type", "X-Requested-With"]
+    methods: ["GET", "POST"]
   },
-  connectTimeout: 10000,
-  pingTimeout: 60000, 
-  pingInterval: 25000,
-  transports: ['websocket', 'polling'], // ✅ Both
-  allowEIO3: true // ✅ Backward compatibility
+  transports: ['websocket', 'polling'],
+  allowEIO3: false,
+  connectTimeout: 8000,
+  pingTimeout: 20000,
+  pingInterval: 10000
 });
-
-// ✅ IMPROVED: Socket authentication with better error handling
-io.use((socket, next) => {
-  try {
-    console.log('🔐 Socket auth attempt from:', socket.handshake.address);
-    
-    const token = socket.handshake.auth.token;
-    
-    if (!token) {
-      console.log('❌ No token provided');
-      return next(new Error('Authentication error: No token provided'));
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // ✅ ADD: Token expiration check
-    if (decoded.exp && Date.now() >= decoded.exp * 1000) {
-      console.log('❌ Token expired');
-      return next(new Error('Authentication error: Token expired'));
-    }
-    
-    socket.userId = decoded.id;
-    socket.userName = decoded.name;
-    console.log('✅ Socket authenticated for user:', socket.userName);
-    next();
-    
-  } catch (err) {
-    console.log('❌ Socket auth failed:', err.message);
-    return next(new Error('Authentication error: ' + err.message));
-  }
-});
-
 
 // ===== MIDDLEWARES =====
+// ✅ SINGLE CORS CONFIGURATION - NO DUPLICATES
 app.use(cors({ 
-  origin: process.env.FRONTEND_URL || "http://localhost:5173", 
+  origin: [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173", 
+    "http://localhost:3000"
+  ],
   credentials: true 
 }));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
@@ -103,16 +75,37 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// ===== SOCKET.IO ROOM MANAGEMENT =====
-// ===== SOCKET.IO ROOM MANAGEMENT =====
-const examRooms = new Map(); // Store active exam rooms
-const pendingCameraRequests = new Set(); // ✅ ADD THIS FOR DUPLICATE PREVENTION
+// ===== SOCKET.IO AUTHENTICATION =====
+io.use((socket, next) => {
+  try {
+    const token = socket.handshake.auth.token;
+    
+    if (!token) {
+      console.log('❌ No token provided');
+      return next(new Error('Authentication error'));
+    }
 
-// ✅ FIXED: Socket.io Events with Room Management
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.userId = decoded.id;
+    socket.userName = decoded.name;
+    console.log('✅ Socket authenticated:', socket.userName);
+    next();
+    
+  } catch (err) {
+    console.log('❌ Socket auth failed');
+    next(new Error('Authentication failed'));
+  }
+});
+
+// ===== SOCKET.IO ROOM MANAGEMENT =====
+const examRooms = new Map();
+const pendingCameraRequests = new Set();
+
 io.on("connection", (socket) => {
   console.log("✅ Socket connected:", socket.id, "User:", socket.userName);
 
   let currentRoom = null;
+
 
   // Join exam room
   socket.on("join-exam-room", ({ roomId, userName, userId, userRole }) => {
@@ -191,34 +184,39 @@ io.on("connection", (socket) => {
     }, 10000);
   });
 
-  // WebRTC Signaling Events
-  socket.on("webrtc-offer", (data) => {
-    console.log('📹 WebRTC offer from:', socket.id, 'to:', data.target);
-    socket.to(data.target).emit("webrtc-offer", {
-      offer: data.offer,
-      from: socket.id,
-      userInfo: {
-        userId: socket.userId,
-        name: socket.userName
-      }
-    });
-  });
 
-  socket.on("webrtc-answer", (data) => {
-    console.log('📹 WebRTC answer from:', socket.id, 'to:', data.target);
-    socket.to(data.target).emit("webrtc-answer", {
-      answer: data.answer,
-      from: socket.id
-    });
-  });
+  //------------------------------------------------------------------------------------//
+// ✅ ENSURE PROPER SOCKET EVENT FORWARDING
 
-  socket.on("ice-candidate", (data) => {
-    socket.to(data.target).emit("ice-candidate", {
-      candidate: data.candidate,
-      from: socket.id
-    });
+// WebRTC Signaling Events - MAKE SURE THESE EXIST
+socket.on("webrtc-offer", (data) => {
+  console.log('📹 Forwarding WebRTC offer to:', data.target);
+  socket.to(data.target).emit("webrtc-offer", {
+    offer: data.offer,
+    from: socket.id,
+    userInfo: {
+      userId: socket.userId,
+      name: socket.userName
+    }
   });
+});
 
+socket.on("webrtc-answer", (data) => {
+  console.log('📹 Forwarding WebRTC answer to:', data.target);
+  socket.to(data.target).emit("webrtc-answer", {
+    answer: data.answer,
+    from: socket.id
+  });
+});
+
+socket.on("ice-candidate", (data) => {
+  console.log('🧊 Forwarding ICE candidate to:', data.target);
+  socket.to(data.target).emit("ice-candidate", {
+    candidate: data.candidate,
+    from: socket.id
+  });
+});
+//-----------------------------------------------------------------------------------------------//
   // Student camera response
   socket.on("camera-response", (data) => {
     console.log('📹 Student camera response from:', socket.id, 'Enabled:', data.enabled);
@@ -293,6 +291,8 @@ io.on("connection", (socket) => {
     console.error('❌ Socket error:', error);
   });
 });
+
+
 
 // ===== START SERVER =====
 const startServer = async () => {

@@ -1,9 +1,9 @@
-// ClassDetails.jsx - FULLY FIXED WITH START QUIZ BUTTON
+// ClassDetails.jsx - WITHOUT ANNOUNCEMENTS
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FaPlus, FaEdit, FaEye, FaRocket, FaTrash } from "react-icons/fa";
-import { getClassDetails, getClassMembers, getClasswork, getClassAnnouncements, createAnnouncement, getQuizForStudent } from "../lib/api";
-import PeopleTab from "../components/PeopleTab"; // ADDED - PeopleTab import
+import { getClassDetails, getClassMembers, getClasswork, getQuizForStudent } from "../lib/api";
+import PeopleTab from "../components/PeopleTab";
 import "./ClassDetails.css";
 
 export default function ClassDetails() {
@@ -13,16 +13,9 @@ export default function ClassDetails() {
   const [classInfo, setClassInfo] = useState(null);
   const [students, setStudents] = useState([]);
   const [classwork, setClasswork] = useState([]);
-  const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("stream");
+  const [activeTab, setActiveTab] = useState("classwork"); // Default to classwork
   
-  // Announcement/Comment states
-  const [newAnnouncement, setNewAnnouncement] = useState("");
-  const [newComment, setNewComment] = useState({});
-  const [showAnnouncementForm, setShowAnnouncementForm] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
-
   // Classwork Create Modal States
   const [showCreateClassworkModal, setShowCreateClassworkModal] = useState(false);
   const [classworkType, setClassworkType] = useState("assignment");
@@ -31,27 +24,17 @@ export default function ClassDetails() {
   const [classworkPoints, setClassworkPoints] = useState("");
   const [classworkDueDate, setClassworkDueDate] = useState("");
   const [creatingClasswork, setCreatingClasswork] = useState(false);
-
-  // Delete states
   const [deletingItem, setDeletingItem] = useState(null);
 
   useEffect(() => {
-    const userData = JSON.parse(localStorage.getItem("user") || "{}");
-    console.log("👤 Current User:", userData);
-    setCurrentUser(userData);
-    
     const fetchClassDetails = async () => {
       try {
         setLoading(true);
         console.log("📋 Fetching class details for:", id);
 
-        // Use API functions instead of direct calls
-        const [classRes, announcementsRes, studentRes, classworkRes] = await Promise.all([
+        // Fetch without announcements
+        const [classRes, studentRes, classworkRes] = await Promise.all([
           getClassDetails(id),
-          getClassAnnouncements(id).catch(err => {
-            console.log("No announcements found:", err);
-            return { data: [] };
-          }),
           getClassMembers(id).catch(err => {
             console.log("Failed to fetch members:", err);
             return { data: [] };
@@ -63,7 +46,6 @@ export default function ClassDetails() {
         ]);
 
         console.log("✅ Class Data:", classRes);
-        console.log("✅ Announcements:", announcementsRes.data);
         console.log("✅ Students:", studentRes.data);
         console.log("✅ Classwork:", classworkRes.data);
 
@@ -73,7 +55,6 @@ export default function ClassDetails() {
           throw new Error(classRes.message || 'Failed to fetch class details');
         }
 
-        setAnnouncements(announcementsRes.data || []);
         setStudents(studentRes.data || []);
         setClasswork(classworkRes.data || []);
 
@@ -168,7 +149,6 @@ export default function ClassDetails() {
       let response;
       
       if (itemType === 'quiz') {
-        // Delete quiz/exam using your examRoutes.js DELETE endpoint
         response = await fetch(`/api/exams/${itemId}`, {
           method: 'DELETE',
           headers: {
@@ -177,7 +157,6 @@ export default function ClassDetails() {
         });
         response = await response.json();
       } else {
-        // Delete regular classwork
         response = await fetch(`/api/classwork/${itemId}`, {
           method: 'DELETE',
           headers: {
@@ -188,7 +167,6 @@ export default function ClassDetails() {
       }
 
       if (response.success) {
-        // Remove from state
         setClasswork(prev => prev.filter(item => item._id !== itemId));
         alert(`${itemType === 'quiz' ? 'Quiz' : 'Assignment'} deleted successfully!`);
       } else {
@@ -202,14 +180,13 @@ export default function ClassDetails() {
     }
   };
 
-  // DEPLOY EXAM FUNCTION - Uses your existing examRoutes.js endpoint
+  // DEPLOY EXAM FUNCTION
   const handleDeployExam = async (examId, examTitle) => {
     if (!window.confirm(`Are you sure you want to publish "${examTitle}"? Students will be able to see and take it.`)) {
       return;
     }
 
     try {
-      // Use your existing examRoutes.js deploy endpoint
       const response = await fetch(`/api/exams/deploy/${examId}`, {
         method: 'PATCH',
         headers: {
@@ -219,7 +196,6 @@ export default function ClassDetails() {
       const result = await response.json();
       
       if (result.success) {
-        // Update the exam in state - your endpoint sets both isPublished and isDeployed to true
         setClasswork(prev => prev.map(item => 
           item._id === examId 
             ? { 
@@ -239,16 +215,14 @@ export default function ClassDetails() {
     }
   };
 
-  // FIXED: STUDENT QUIZ ACCESS FUNCTION - IMPROVED LOGIC
+  // STUDENT QUIZ ACCESS FUNCTION
   const handleStartQuiz = async (examId, examTitle) => {
     try {
       console.log("🎯 Student starting quiz:", examId, examTitle);
       
-      // Check if quiz is available
       const response = await getQuizForStudent(examId);
       
       if (response.success) {
-        // Navigate to the student quiz page
         navigate(`/student-quiz/${examId}`);
       } else {
         alert('Quiz not available: ' + response.message);
@@ -259,25 +233,14 @@ export default function ClassDetails() {
     }
   };
 
-  // Check if quiz is available for students - FIXED LOGIC
+  // Check if quiz is available for students
   const isQuizAvailableForStudent = (item) => {
-    // Multiple conditions for quiz availability
     if (item.isPublished) return true;
     if (item.isDeployed) return true;
-    if (item.isQuiz) return true; // If it's marked as a quiz, assume it's available
-    if (item.type === 'quiz') return true; // If type is quiz, assume it's available
+    if (item.isQuiz) return true;
+    if (item.type === 'quiz') return true;
     
     return false;
-  };
-
-  // REFRESH CLASSWORK FUNCTION
-  const refreshClasswork = async () => {
-    try {
-      const classworkRes = await getClasswork(id);
-      setClasswork(classworkRes.data || []);
-    } catch (error) {
-      console.error("Failed to refresh classwork:", error);
-    }
   };
 
   // Reset classwork form
@@ -297,7 +260,6 @@ export default function ClassDetails() {
       quiz: "❓",
       question: "💬",
       material: "📎",
-      announcement: "📢",
       topic: "📂"
     };
     return icons[type] || "📄";
@@ -355,14 +317,8 @@ export default function ClassDetails() {
         </div>
       </header>
 
-      {/* Tab Navigation */}
+      {/* Tab Navigation - WITHOUT STREAM TAB */}
       <div className="tabs-navigation">
-        <button 
-          className={`tab-btn ${activeTab === "stream" ? "active" : ""}`}
-          onClick={() => setActiveTab("stream")}
-        >
-          Stream
-        </button>
         <button 
           className={`tab-btn ${activeTab === "classwork" ? "active" : ""}`}
           onClick={() => setActiveTab("classwork")}
@@ -377,7 +333,7 @@ export default function ClassDetails() {
         </button>
       </div>
 
-      {/* CLASSWORK TAB WITH FIXED START QUIZ BUTTON */}
+      {/* CLASSWORK TAB */}
       {activeTab === "classwork" && (
         <section className="section">
           <div className="section-header">
@@ -407,19 +363,6 @@ export default function ClassDetails() {
             {classwork.length > 0 ? (
               <div className="classwork-grid">
                 {classwork.map((item) => {
-                  // Debug logging for quiz items
-                  if (item.type === 'quiz') {
-                    console.log("📝 Quiz Item Debug:", {
-                      id: item._id,
-                      title: item.title,
-                      type: item.type,
-                      isPublished: item.isPublished,
-                      isDeployed: item.isDeployed,
-                      isQuiz: item.isQuiz,
-                      available: isQuizAvailableForStudent(item)
-                    });
-                  }
-
                   const isQuizAvailable = isQuizAvailableForStudent(item);
 
                   return (
@@ -446,7 +389,6 @@ export default function ClassDetails() {
                         {item.questions && (
                           <span>Questions: {item.questions.length || 0}</span>
                         )}
-                        {/* Show status based on your examRoutes.js fields */}
                         {(item.isPublished || item.isDeployed) && (
                           <span className="status published">Published</span>
                         )}
@@ -471,7 +413,6 @@ export default function ClassDetails() {
                                 >
                                   <FaEye /> Preview
                                 </button>
-                                {/* Show deploy button only for unpublished quizzes */}
                                 {!item.isPublished && !item.isDeployed && (
                                   <button 
                                     className="deploy-btn btn-small"
@@ -509,7 +450,6 @@ export default function ClassDetails() {
                             )}
                           </>
                         ) : (
-                          // FIXED: Student view - ALWAYS show Start Quiz button for quiz items
                           item.type === 'quiz' && (
                             <div className="student-quiz-section">
                               <button 
@@ -579,7 +519,7 @@ export default function ClassDetails() {
         </section>
       )}
 
-      {/* PEOPLE TAB - UPDATED WITH PEOPLE TAB COMPONENT */}
+      {/* PEOPLE TAB */}
       {activeTab === "students" && (
         <section className="section">
           <div className="section-header">
@@ -703,4 +643,4 @@ export default function ClassDetails() {
       )}
     </div>
   );
-} 
+}

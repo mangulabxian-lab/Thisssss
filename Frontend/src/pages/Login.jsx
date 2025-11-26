@@ -1,8 +1,11 @@
-// src/pages/Login.jsx - UPDATED WITH ONLY GOOGLE ICON
+// src/pages/Login.jsx - VisionProctor Login Page (Tailwind + CCS Logo)
 import { useState, useEffect } from "react";
 import api from "../lib/api";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
-import styles from "./Login.module.css";
+
+// Correct imports from your assets folder
+import bgImage from "../assets/ccs-bg.jpg";
+import logo from "../assets/logo.png";
 
 export default function Login() {
   const [form, setForm] = useState({ email: "", password: "" });
@@ -11,26 +14,22 @@ export default function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // Check for Google OAuth errors in URL
   useEffect(() => {
-    const errorParam = searchParams.get('error');
-    if (errorParam) {
-      setError(decodeURIComponent(errorParam));
-    }
+    const errorParam = searchParams.get("error");
+    if (errorParam) setError(decodeURIComponent(errorParam));
   }, [searchParams]);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
-    // Clear error when user starts typing
     if (error) setError("");
   };
 
   const handleGoogleLogin = () => {
     try {
-      const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+      const backendUrl = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
       window.location.href = `${backendUrl}/auth/google`;
-    } catch (error) {
-      setError("Google login is currently unavailable. Please use email login.");
+    } catch {
+      setError("Google login unavailable.");
     }
   };
 
@@ -40,110 +39,114 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // Check if it's a Gmail address on frontend too
-      if (!form.email.endsWith('@gmail.com')) {
-        setError("❌ Only Gmail accounts are allowed for login");
+      if (!form.email.endsWith("@gmail.com")) {
+        setError("❌ Only Gmail accounts are allowed.");
         setLoading(false);
         return;
       }
 
-      const res = await api.post("/auth/login", {
-        email: form.email,
-        password: form.password,
-      });
-
+      const res = await api.post("/auth/login", form);
       const { token, user } = res.data;
 
       localStorage.setItem("token", token);
       localStorage.setItem("userName", user.name);
-
-      console.log("✅ Login successful - User:", user.name);
       navigate("/dashboard");
-
     } catch (err) {
-      setError(err.response?.data?.message || "❌ Login failed");
+      setError(err.response?.data?.message || "Login failed.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className={styles.wrapper}>
-      {/* Left Panel - Login Form */}
-      <div className={styles.leftPanel}>
-        <div className={styles.loginContainer}>
-          <h1 className={styles.loginTitle}>Sign in</h1>
-          
-          {/* Google Login Button Only */}
-          <div className={styles.socialButtons}>
-            <button type="button" onClick={handleGoogleLogin} className={`${styles.socialButton} ${styles.google}`}>
-              <span className={styles.socialIcon}>G+</span>
-            </button>
-          </div>
+    <div
+      className="min-h-screen w-full flex items-center justify-center bg-cover bg-center bg-no-repeat relative p-4"
+      style={{ backgroundImage: `url(${bgImage})` }}
+    >
+      {/* Dark overlay */}
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
 
-          <div className={styles.divider}>
-            <span className={styles.dividerText}>or use your account</span>
-          </div>
+      {/* Main Card */}
+      <div className="relative z-10 bg-white w-full max-w-md rounded-2xl shadow-2xl p-8">
 
-          <form onSubmit={handleSubmit} className={styles.form}>
-            <div className={styles.inputGroup}>
-              <input
-                type="email"
-                name="email"
-                placeholder="Email"
-                value={form.email}
-                onChange={handleChange}
-                required
-                className={styles.input}
-              />
-            </div>
-            
-            <div className={styles.inputGroup}>
-              <input
-                type="password"
-                name="password"
-                placeholder="Password"
-                value={form.password}
-                onChange={handleChange}
-                required
-                className={styles.input}
-              />
-            </div>
+        {/* CCS Logo */}
+        <img
+          src={logo}
+          alt="CCS Logo"
+          className="w-20 h-20 mx-auto mb-3"
+        />
 
-            <div className={styles.forgotPassword}>
-              <a href="#" className={styles.forgotLink}>Forgot your password?</a>
-            </div>
+        {/* VisionProctor Title */}
+        <h2 className="text-2xl font-bold text-center text-gray-800 mb-4">
+          VisionProctor
+        </h2>
 
-            {error && (
-              <div className={styles.errorContainer}>
-                <p className={styles.error}>{error}</p>
-                {error.includes("not registered") && (
-                  <p className={styles.registerHint}>
-                    Please <Link to="/register">register first</Link> before logging in.
-                  </p>
-                )}
-              </div>
-            )}
+        {/* Page Title */}
+        <h1 className="text-3xl font-semibold text-center text-gray-800 mb-6">
+          Sign In
+        </h1>
 
-            <button type="submit" className={styles.submitButton} disabled={loading}>
-              {loading ? "SIGNING IN..." : "SIGN IN"}
-            </button>
-          </form>
+        {/* Google Login Button */}
+        <button
+          onClick={handleGoogleLogin}
+          className="w-full flex items-center justify-center gap-3 bg-red-500 text-white py-3 rounded-lg hover:bg-red-600 transition font-semibold"
+        >
+          <span className="font-bold text-lg">G+</span> Continue with Google
+        </button>
+
+        <div className="flex items-center my-6">
+          <div className="flex-grow h-px bg-gray-300" />
+          <span className="px-3 text-gray-600 text-sm">or use email</span>
+          <div className="flex-grow h-px bg-gray-300" />
         </div>
-      </div>
 
-      {/* Right Panel - Welcome Message */}
-      <div className={styles.rightPanel}>
-        <div className={styles.welcomeContainer}>
-         
-          <button 
-            className={styles.signUpButton}
-            onClick={() => navigate("/register")}
+        {/* Email Login Form */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+
+          <input
+            type="email"
+            name="email"
+            placeholder="Email"
+            value={form.email}
+            onChange={handleChange}
+            className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none"
+            required
+          />
+
+          <input
+            type="password"
+            name="password"
+            placeholder="Password"
+            value={form.password}
+            onChange={handleChange}
+            className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none"
+            required
+          />
+
+          {error && (
+            <p className="bg-red-100 text-red-600 text-center py-2 rounded-lg border border-red-300">
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition uppercase font-semibold"
           >
-            SIGN UP
+            {loading ? "Signing in..." : "Sign In"}
           </button>
-          
-        </div>
+        </form>
+
+        <p className="text-center text-sm mt-5 text-gray-600">
+          Don’t have an account?
+          <button
+            onClick={() => navigate("/register")}
+            className="text-indigo-600 font-semibold hover:underline ml-1"
+          >
+            Sign Up
+          </button>
+        </p>
       </div>
     </div>
   );

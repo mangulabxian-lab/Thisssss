@@ -60,7 +60,7 @@ app.use("/api/auth", require("./routes/auth"));
 app.use("/api/class", require("./routes/classes"));
 app.use("/api/exams", require("./routes/examRoutes"));
 app.use("/api/classwork", require("./routes/classwork"));
-app.use("/api/announcements", require("./routes/announcements"));
+// ANNOUNCEMENTS ROUTE REMOVED
 app.use("/api/student-management", require("./routes/studentManagement"));
 app.use("/api/notifications", require("./routes/notifications"));
 

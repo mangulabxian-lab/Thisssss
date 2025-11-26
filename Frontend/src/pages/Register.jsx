@@ -1,8 +1,11 @@
-// src/pages/Register.jsx - COMPLETELY FIXED WITH reCAPTCHA v2
+// src/pages/Register.jsx - VisionProctor Register Page (Tailwind + CCS Logo)
 import { useState, useRef, useEffect } from "react";
 import api from "../lib/api";
 import { useNavigate } from "react-router-dom";
-import styles from "./Register.module.css";
+
+// Correct imports
+import bgImage from "../assets/ccs-bg.jpg";
+import logo from "../assets/logo.png";
 
 export default function Register() {
   const [form, setForm] = useState({
@@ -10,6 +13,8 @@ export default function Register() {
     email: "",
     username: "",
     password: "",
+    course: "",
+    section: "",
   });
 
   const [error, setError] = useState("");
@@ -17,411 +22,252 @@ export default function Register() {
   const [showOTP, setShowOTP] = useState(false);
   const [otp, setOtp] = useState("");
   const [tempUser, setTempUser] = useState(null);
-  const [recaptchaLoaded, setRecaptchaLoaded] = useState(false);
+
   const recaptchaRef = useRef(null);
+  const [recaptchaLoaded, setRecaptchaLoaded] = useState(false);
+
   const navigate = useNavigate();
 
-  // Load reCAPTCHA script
+  // Load reCAPTCHA
   useEffect(() => {
-    const loadReCaptcha = () => {
-      // Check if already loaded
-      if (window.grecaptcha) {
-        setRecaptchaLoaded(true);
-        return;
-      }
-
-      // Check if script already exists
-      if (document.querySelector('script[src*="recaptcha"]')) {
-        // Wait for script to load
-        const checkRecaptcha = setInterval(() => {
-          if (window.grecaptcha) {
-            setRecaptchaLoaded(true);
-            clearInterval(checkRecaptcha);
-          }
-        }, 100);
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = `https://www.google.com/recaptcha/api.js?render=explicit`;
-      script.async = true;
-      script.defer = true;
-      script.onload = () => {
-        console.log('✅ reCAPTCHA script loaded successfully');
-        setRecaptchaLoaded(true);
-      };
-      script.onerror = () => {
-        console.error('❌ Failed to load reCAPTCHA script');
-        setError("Failed to load security verification. Please refresh the page.");
-      };
-      document.head.appendChild(script);
-    };
-
-    loadReCaptcha();
+    const script = document.createElement("script");
+    script.src = "https://www.google.com/recaptcha/api.js";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setRecaptchaLoaded(true);
+    document.body.appendChild(script);
   }, []);
-
-  // Initialize reCAPTCHA widget when script loads
-  useEffect(() => {
-    if (recaptchaLoaded && window.grecaptcha) {
-      console.log('🔄 Initializing reCAPTCHA widget...');
-      
-      // Small delay to ensure DOM is ready
-      const initTimeout = setTimeout(() => {
-        if (recaptchaRef.current && !recaptchaRef.current.hasChildNodes()) {
-          try {
-            const widgetId = window.grecaptcha.render(recaptchaRef.current, {
-              sitekey: import.meta.env.VITE_RECAPTCHA_SITE_KEY,
-              theme: 'light',
-              size: 'normal',
-              callback: (token) => {
-                console.log('✅ reCAPTCHA completed with token');
-              },
-              'expired-callback': () => {
-                console.log('⚠️ reCAPTCHA expired');
-                setError("Security verification expired. Please verify again.");
-              },
-              'error-callback': () => {
-                console.log('❌ reCAPTCHA error');
-                setError("Security verification failed. Please try again.");
-              }
-            });
-            
-            console.log('✅ reCAPTCHA widget created with ID:', widgetId);
-          } catch (error) {
-            console.error('❌ Error creating reCAPTCHA widget:', error);
-            setError("Failed to initialize security verification.");
-          }
-        }
-      }, 500);
-
-      return () => clearTimeout(initTimeout);
-    }
-  }, [recaptchaLoaded]);
-
-  // Get reCAPTCHA token
-  const getRecaptchaToken = () => {
-    if (!window.grecaptcha) {
-      throw new Error("Security verification not loaded. Please refresh the page.");
-    }
-
-    const recaptchaResponse = window.grecaptcha.getResponse();
-    
-    if (!recaptchaResponse) {
-      throw new Error("Please complete the security verification");
-    }
-
-    return recaptchaResponse;
-  };
-
-  // Reset reCAPTCHA
-  const resetRecaptcha = () => {
-    if (window.grecaptcha) {
-      window.grecaptcha.reset();
-    }
-  };
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
-    // Clear error when user starts typing
     if (error) setError("");
   };
 
-  // ✅ Password validation
-  const validatePassword = (password) => {
-    const minLength = 8;
-    const hasUpperCase = /[A-Z]/.test(password);
-    const hasLowerCase = /[a-z]/.test(password);
-    const hasNumbers = /\d/.test(password);
-    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
-
-    return {
-      isValid: password.length >= minLength && hasUpperCase && hasLowerCase && hasNumbers && hasSpecialChar,
-      requirements: {
-        minLength: password.length >= minLength,
-        hasUpperCase,
-        hasLowerCase,
-        hasNumbers,
-        hasSpecialChar
-      }
-    };
-  };
+  const validatePassword = (password) =>
+    password.length >= 8 &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /\d/.test(password) &&
+    /[!@#$%^&*]/.test(password);
 
   const handleGoogleLogin = () => {
-    try {
-      const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-      window.location.href = `${backendUrl}/auth/google`;
-    } catch (error) {
-      setError("Google login is currently unavailable. Please use email registration.");
-    }
+    const backendUrl = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
+    window.location.href = `${backendUrl}/auth/google`;
   };
 
-  // ✅ Registration Handler with reCAPTCHA v2
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
 
-    // Check if it's a Gmail address
-    if (!form.email.endsWith('@gmail.com')) {
-      setError("❌ Only Gmail accounts are allowed for registration");
-      return;
-    }
+    if (!form.email.endsWith("@gmail.com"))
+      return setError("❌ Only Gmail accounts allowed.");
 
-    // Validate required fields
-    if (!form.name || !form.email || !form.password) {
-      setError("❌ Please fill in all required fields");
-      return;
-    }
+    if (!validatePassword(form.password))
+      return setError("❌ Password does not meet security requirements.");
 
-    // Validate password
-    const passwordValidation = validatePassword(form.password);
-    if (!passwordValidation.isValid) {
-      setError("❌ Password does not meet requirements");
-      return;
-    }
+    if (!form.course || !form.section)
+      return setError("❌ Please provide your Course and Section.");
 
     setLoading(true);
 
     try {
-      // Get reCAPTCHA token (v2 style)
-      const recaptchaToken = getRecaptchaToken();
-      
-      console.log('🔄 Sending registration request with reCAPTCHA token...');
-      
+      const recaptchaToken = window.grecaptcha.getResponse();
+
       const res = await api.post("/auth/register", {
-        name: form.name,
-        email: form.email,
-        username: form.username || form.name.toLowerCase().replace(/\s+/g, ''),
-        password: form.password,
-        recaptchaToken: recaptchaToken
+        ...form,
+        username: form.username || form.name.toLowerCase().replace(/\s+/g, ""),
+        recaptchaToken,
       });
-      
+
       if (res.data.success) {
-        // Show OTP verification
         setTempUser({ email: form.email });
         setShowOTP(true);
-        resetRecaptcha();
-        setError("");
-      } else {
-        throw new Error(res.data.message || "Registration failed");
       }
-      
     } catch (err) {
-      console.error('❌ Registration error:', err);
-      setError(err.response?.data?.message || err.message || "❌ Registration failed");
-      resetRecaptcha();
+      setError(err.response?.data?.message || "Registration failed.");
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ OTP Verification
   const handleOTPVerify = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError("");
 
     try {
       const res = await api.post("/auth/verify-email", {
         email: tempUser.email,
-        otp: otp
+        otp,
       });
 
-      if (res.data.success) {
-        navigate("/login", { 
-          state: { message: "✅ Registration successful! Please login." } 
-        });
-      } else {
-        throw new Error(res.data.message || "Verification failed");
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || "❌ Invalid OTP");
+      if (res.data.success) navigate("/login");
+    } catch {
+      setError("Invalid OTP");
     } finally {
       setLoading(false);
     }
   };
 
-  const passwordValidation = validatePassword(form.password);
-
   return (
-    <div className={styles.wrapper}>
-      {/* Left Panel - Welcome Message */}
-      <div className={styles.leftPanel}>
-        <div className={styles.welcomeContainer}>
-          <button 
-            className={styles.signInButton}
-            onClick={() => navigate("/login")}
-          >
-            SIGN IN
-          </button>
-        </div>
-      </div>
+    <div
+      className="min-h-screen w-full flex items-center justify-center bg-cover bg-center bg-no-repeat relative p-4"
+      style={{ backgroundImage: `url(${bgImage})` }}
+    >
+      {/* Dark overlay */}
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
 
-      {/* Right Panel - Registration Form */}
-      <div className={styles.rightPanel}>
-        <div className={styles.registerContainer}>
-          <h1 className={styles.registerTitle}>Create Account</h1>
-          
-          {/* Google Button Only */}
-          <div className={styles.socialButtons}>
-            <button 
-              type="button" 
-              onClick={handleGoogleLogin} 
-              className={`${styles.socialButton} ${styles.google}`}
+      {/* Register Card */}
+      <div className="relative z-10 bg-white w-full max-w-md rounded-2xl shadow-2xl p-8">
+
+        {/* CCS Logo */}
+        <img
+          src={logo}
+          alt="CCS Logo"
+          className="w-20 h-20 mx-auto mb-3"
+        />
+
+        {/* VisionProctor Title */}
+        <h2 className="text-2xl font-bold text-center text-gray-800 mb-4">
+          VisionProctor
+        </h2>
+
+        {/* Page Title */}
+        <h1 className="text-3xl font-semibold text-center text-gray-800 mb-6">
+          Create Account
+        </h1>
+
+        {/* Google Button */}
+        <button
+          onClick={handleGoogleLogin}
+          className="w-full flex items-center justify-center gap-3 bg-red-500 text-white py-3 rounded-lg hover:bg-red-600 transition mb-4 font-semibold"
+        >
+          <span className="font-bold text-lg">G+</span> Continue with Google
+        </button>
+
+        <div className="flex items-center my-6">
+          <div className="flex-grow h-px bg-gray-300" />
+          <span className="px-3 text-gray-600 text-sm">or register with email</span>
+          <div className="flex-grow h-px bg-gray-300" />
+        </div>
+
+        {!showOTP ? (
+          <form onSubmit={handleSubmit} className="space-y-4">
+
+            <input
+              type="text"
+              name="name"
+              placeholder="Full Name *"
+              value={form.name}
+              onChange={handleChange}
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none"
+              required
+            />
+
+            <input
+              type="email"
+              name="email"
+              placeholder="Email *"
+              value={form.email}
+              onChange={handleChange}
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none"
+              required
+            />
+
+            <input
+              type="password"
+              name="password"
+              placeholder="Password *"
+              value={form.password}
+              onChange={handleChange}
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none"
+              required
+            />
+
+            <input
+              type="text"
+              name="course"
+              placeholder="Course (ex: BSIT) *"
+              value={form.course}
+              onChange={handleChange}
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none"
+              required
+            />
+
+            <input
+              type="text"
+              name="section"
+              placeholder="Section (ex: 3A) *"
+              value={form.section}
+              onChange={handleChange}
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none"
+              required
+            />
+
+            {/* reCAPTCHA */}
+            <div className="flex justify-center">
+              <div
+                ref={recaptchaRef}
+                className="g-recaptcha"
+                data-sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY}
+              />
+            </div>
+
+            {error && (
+              <p className="bg-red-100 text-red-600 text-center py-2 rounded-lg border border-red-300">
+                {error}
+              </p>
+            )}
+
+            <button
+              disabled={loading}
+              className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition uppercase font-semibold"
             >
-              <span className={styles.socialIcon}>G+</span>
+              {loading ? "Creating..." : "Sign Up"}
             </button>
-          </div>
 
-          <div className={styles.divider}>
-            <span className={styles.dividerText}>or use your email for registration</span>
-          </div>
+          </form>
+        ) : (
+          /* OTP Section */
+          <form onSubmit={handleOTPVerify} className="space-y-4">
 
-          {!showOTP ? (
-            // Registration Form
-            <form onSubmit={handleSubmit} className={styles.form}>
-              <div className={styles.inputGroup}>
-                <input
-                  type="text"
-                  name="name"
-                  placeholder="Name *"
-                  value={form.name}
-                  onChange={handleChange}
-                  required
-                  className={styles.input}
-                  disabled={loading}
-                />
-              </div>
-              
-              <div className={styles.inputGroup}>
-                <input
-                  type="email"
-                  name="email"
-                  placeholder="Email *"
-                  value={form.email}
-                  onChange={handleChange}
-                  required
-                  className={styles.input}
-                  disabled={loading}
-                />
-              </div>
-              
-              <div className={styles.inputGroup}>
-                <input
-                  type="password"
-                  name="password"
-                  placeholder="Password *"
-                  value={form.password}
-                  onChange={handleChange}
-                  required
-                  className={styles.input}
-                  disabled={loading}
-                />
-              </div>
+            <p className="text-center text-gray-700 text-lg">
+              Verification sent to:
+              <br />
+              <span className="font-bold">{tempUser.email}</span>
+            </p>
 
-              {/* Password Requirements */}
-              {form.password && (
-                <div className={styles.passwordRequirements}>
-                  <p className={styles.requirementsTitle}>Password must contain:</p>
-                  <ul className={styles.requirementsList}>
-                    <li className={passwordValidation.requirements.minLength ? styles.valid : styles.invalid}>
-                      At least 8 characters
-                    </li>
-                    <li className={passwordValidation.requirements.hasUpperCase ? styles.valid : styles.invalid}>
-                      One uppercase letter
-                    </li>
-                    <li className={passwordValidation.requirements.hasLowerCase ? styles.valid : styles.invalid}>
-                      One lowercase letter
-                    </li>
-                    <li className={passwordValidation.requirements.hasNumbers ? styles.valid : styles.invalid}>
-                      One number
-                    </li>
-                    <li className={passwordValidation.requirements.hasSpecialChar ? styles.valid : styles.invalid}>
-                      One special character
-                    </li>
-                  </ul>
-                </div>
-              )}
+            <input
+              type="text"
+              placeholder="Enter OTP"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value)}
+              className="w-full px-4 py-3 border rounded-lg"
+              required
+            />
 
-              {/* Google reCAPTCHA v2 Widget */}
-              <div className={styles.recaptchaContainer}>
-                {!recaptchaLoaded ? (
-                  <div className={styles.recaptchaLoading}>
-                    Loading security verification...
-                  </div>
-                ) : (
-                  <div 
-                    ref={recaptchaRef}
-                    className="g-recaptcha"
-                    data-sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY}
-                  />
-                )}
-              </div>
+            {error && (
+              <p className="bg-red-100 text-red-600 text-center py-2 rounded-lg border border-red-300">
+                {error}
+              </p>
+            )}
 
-              {error && (
-                <div className={styles.errorContainer}>
-                  <p className={styles.error}>{error}</p>
-                </div>
-              )}
+            <button className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition uppercase font-semibold">
+              {loading ? "Verifying..." : "Verify OTP"}
+            </button>
 
-              <button 
-                type="submit" 
-                className={styles.submitButton} 
-                disabled={loading || !recaptchaLoaded}
-              >
-                {loading ? "CREATING ACCOUNT..." : "SIGN UP"}
-              </button>
-            </form>
-          ) : (
-            // OTP Verification Form
-            <form onSubmit={handleOTPVerify} className={styles.form}>
-              <div className={styles.otpMessage}>
-                <p>📧 Verification code sent to:</p>
-                <p className={styles.emailText}>{tempUser?.email}</p>
-                <p>Please check your Gmail and enter the OTP below:</p>
-              </div>
-              
-              <div className={styles.inputGroup}>
-                <input
-                  type="text"
-                  placeholder="Enter 6-digit OTP"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  className={styles.input}
-                  maxLength="6"
-                  required
-                  disabled={loading}
-                />
-              </div>
-              
-              {error && (
-                <div className={styles.errorContainer}>
-                  <p className={styles.error}>{error}</p>
-                </div>
-              )}
+          </form>
+        )}
 
-              <div className={styles.otpButtons}>
-                <button 
-                  type="button" 
-                  onClick={() => {
-                    setShowOTP(false);
-                    setError("");
-                  }} 
-                  className={styles.backButton}
-                  disabled={loading}
-                >
-                  Back
-                </button>
-                <button 
-                  type="submit" 
-                  className={`${styles.verifyButton} ${loading ? styles.loading : ''}`} 
-                  disabled={loading || otp.length !== 6}
-                >
-                  {loading ? "VERIFYING..." : "VERIFY OTP"}
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
+        <p className="text-center text-sm mt-5 text-gray-600">
+          Already have an account?
+          <button
+            onClick={() => navigate("/login")}
+            className="text-indigo-600 font-semibold hover:underline ml-1"
+          >
+            Sign In
+          </button>
+        </p>
+
       </div>
     </div>
   );

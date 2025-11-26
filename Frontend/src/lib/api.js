@@ -266,66 +266,6 @@ export const getClassTopics = async (classId) => {
   return response.data;
 };
 
-// ===== ANNOUNCEMENT API FUNCTIONS =====
-export const createAnnouncement = async (announcementData) => {
-  const response = await api.post("/announcements", announcementData);
-  return response.data;
-};
-
-export const getClassAnnouncements = async (classId) => {
-  const response = await api.get(`/announcements/class/${classId}`);
-  return response.data;
-};
-
-export const getAnnouncement = async (announcementId) => {
-  const response = await api.get(`/announcements/${announcementId}`);
-  return response.data;
-};
-
-// FIXED: Update announcement function with detailed debugging
-export const updateAnnouncement = async (announcementId, updateData) => {
-  try {
-    console.log("🚀 API: updateAnnouncement CALLED");
-    console.log("📦 Request Data:", {
-      announcementId,
-      updateData,
-      url: `/announcements/${announcementId}`
-    });
-
-    const token = localStorage.getItem("token");
-    console.log("🔑 Token exists:", !!token);
-
-    const response = await api.put(`/announcements/${announcementId}`, updateData);
-    
-    console.log("✅ API Response SUCCESS:", response.data);
-    return response.data;
-  } catch (error) {
-    console.error("❌ API Error updating announcement:", error);
-    console.error("📡 Error Details:", {
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      data: error.response?.data,
-      message: error.message
-    });
-    throw error;
-  }
-};
-
-export const deleteAnnouncement = async (announcementId) => {
-  const response = await api.delete(`/announcements/${announcementId}`);
-  return response.data;
-};
-
-export const addCommentToAnnouncement = async (announcementId, commentData) => {
-  const response = await api.post(`/announcements/${announcementId}/comments`, commentData);
-  return response.data;
-};
-
-export const deleteCommentFromAnnouncement = async (announcementId, commentId) => {
-  const response = await api.delete(`/announcements/${announcementId}/comments/${commentId}`);
-  return response.data;
-};
-
 // ===== CLASS FUNCTIONS =====
 export const getClassDetails = async (classId) => {
   const response = await api.get(`/class/${classId}`);

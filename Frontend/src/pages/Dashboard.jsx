@@ -2826,7 +2826,7 @@ const renderPeopleTab = () => {
           onClick={() => handleStartExamSession(item)}
           title="Start live exam session"
         >
-          📹 Start Live Session
+          START
         </button>
         
         {!item.isDeployed ? (
@@ -2843,7 +2843,7 @@ const renderPeopleTab = () => {
             onClick={() => handleUndeployExam(item._id)}
             title="Undeploy exam"
           >
-            ⏸️ Stop Deployment
+            END
           </button>
         )}
       </div>

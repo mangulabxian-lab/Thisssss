@@ -4843,7 +4843,7 @@ a:focus {
   padding: 20px;
   transition: box-shadow 0.2s;
   width: 1000px;
-  height: 80px;
+  height: 350px;
 }
 
 .classwork-card:hover {
@@ -5528,8 +5528,8 @@ a:focus {
 }
 
 .start-session-btn, .view-session-btn {
-  background: #dc2626;
-  color: black;
+  background: #0000;
+  color: green;
   border: none;
   padding: 8px 12px;
   border-radius: 6px;
@@ -5539,7 +5539,7 @@ a:focus {
 }
 
 .start-session-btn:hover {
-  background: #b91c1c;
+  background: green;
 }
 
 .view-session-btn {
@@ -5641,6 +5641,7 @@ a:focus {
   color: #28a745;
   font-size: 12px;
 }
+
 
 .quiz-info.waiting {
   text-align: center;

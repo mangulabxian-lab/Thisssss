@@ -1,4 +1,4 @@
-// TeacherExamSession.jsx - UPDATED WITH PROCTORING POPUP
+// TeacherExamSession.jsx - COMPLETE FIXED VERSION WITH PROCTORING ALERTS
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
@@ -21,7 +21,7 @@ export default function TeacherExamSession() {
   const [socket, setSocket] = useState(null);
   const [studentStreams, setStudentStreams] = useState({});
   const [peerConnections, setPeerConnections] = useState({});
-  const [userRole] = useState('student'); 
+  
   // Chat State
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -37,12 +37,103 @@ export default function TeacherExamSession() {
   const [showProctoringControls, setShowProctoringControls] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
 
+  // ✅ PROCTORING ALERTS STATE
+  const [proctoringAlerts, setProctoringAlerts] = useState({});
+  const [expandedAlerts, setExpandedAlerts] = useState({});
+
   // Refs
   const timerRef = useRef(null);
   const videoRefs = useRef({});
   const socketRef = useRef(null);
   const activeConnections = useRef(new Set());
   const messagesEndRef = useRef(null);
+
+  // ==================== PROCTORING ALERTS FUNCTIONS ====================
+  const handleProctoringAlert = useCallback((data) => {
+    console.log('🚨 Teacher received proctoring alert:', data);
+    
+    if (!data.studentSocketId) {
+      console.error('❌ No student socket ID in proctoring alert');
+      return;
+    }
+
+    const alertMessage = data.message || 'Suspicious activity detected';
+    const messageString = typeof alertMessage === 'string' ? alertMessage : String(alertMessage);
+
+    const newAlert = {
+      id: Date.now() + Math.random(),
+      message: messageString,
+      type: data.type || 'warning',
+      severity: data.severity || 'medium',
+      timestamp: new Date().toLocaleTimeString(),
+      details: data.details || {},
+      studentSocketId: data.studentSocketId
+    };
+
+    console.log('📝 Storing alert for student:', data.studentSocketId, newAlert);
+
+    setProctoringAlerts(prev => {
+      const studentAlerts = prev[data.studentSocketId] || [];
+      const updatedAlerts = {
+        ...prev,
+        [data.studentSocketId]: [
+          newAlert,
+          ...studentAlerts.slice(0, 19)
+        ]
+      };
+      return updatedAlerts;
+    });
+
+    // Update student status
+    setStudents(prev => prev.map(student => {
+      if (student.socketId === data.studentSocketId) {
+        const currentAlerts = proctoringAlerts[data.studentSocketId] || [];
+        const newAlertCount = currentAlerts.length + 1;
+        
+        return { 
+          ...student, 
+          hasAlerts: true,
+          lastAlert: newAlert.timestamp,
+          alertCount: newAlertCount
+        };
+      }
+      return student;
+    }));
+
+    console.log('🔔 Alert processed successfully for teacher view:', messageString);
+  }, [proctoringAlerts]);
+
+  // ==================== ALERTS MANAGEMENT FUNCTIONS ====================
+  const toggleAlertsDropdown = (studentSocketId) => {
+    setExpandedAlerts(prev => ({
+      ...prev,
+      [studentSocketId]: !prev[studentSocketId]
+    }));
+  };
+
+  const clearStudentAlerts = (studentSocketId, e) => {
+    e.stopPropagation();
+    console.log('🗑️ Clearing alerts for student:', studentSocketId);
+    
+    setProctoringAlerts(prev => {
+      const updated = { ...prev };
+      delete updated[studentSocketId];
+      return updated;
+    });
+    
+    setExpandedAlerts(prev => {
+      const updated = { ...prev };
+      delete updated[studentSocketId];
+      return updated;
+    });
+    
+    // Update student status
+    setStudents(prev => prev.map(student => 
+      student.socketId === studentSocketId 
+        ? { ...student, hasAlerts: false, alertCount: 0 }
+        : student
+    ));
+  };
 
   // ==================== PROCTORING CONTROLS FUNCTIONS ====================
   const openProctoringControls = (student) => {
@@ -79,7 +170,6 @@ export default function TeacherExamSession() {
   // ==================== TIMER CONTROL FUNCTIONS ====================
   const toggleTimerControls = () => {
     setShowTimerControls(!showTimerControls);
-    // Close proctoring controls if open
     if (showProctoringControls) {
       setShowProctoringControls(false);
     }
@@ -121,7 +211,6 @@ export default function TeacherExamSession() {
     // BROADCAST NEW TIME TO ALL STUDENTS
     broadcastTimeUpdate(totalSeconds, isTimerRunning);
     
-    // Show confirmation
     alert(`✅ Timer set to ${formatTime(totalSeconds)}. All students will see this time.`);
   };
 
@@ -156,11 +245,7 @@ export default function TeacherExamSession() {
     });
 
     setTimeLeft(newTime);
-    
-    // BROADCAST ADDED TIME TO ALL STUDENTS
     broadcastTimeUpdate(newTime);
-    
-    // Show confirmation
     alert(`✅ Added ${minutes} minutes. New time: ${formatTime(newTime)}`);
   };
 
@@ -168,8 +253,6 @@ export default function TeacherExamSession() {
     console.log('⏸️ Teacher pausing timer');
     setIsTimerRunning(false);
     setShowTimerControls(false);
-    
-    // BROADCAST PAUSE TO ALL STUDENTS
     broadcastTimeUpdate(timeLeft, false);
   };
 
@@ -177,8 +260,6 @@ export default function TeacherExamSession() {
     console.log('▶️ Teacher resuming timer');
     setIsTimerRunning(true);
     setShowTimerControls(false);
-    
-    // BROADCAST RESUME TO ALL STUDENTS
     broadcastTimeUpdate(timeLeft, true);
   };
 
@@ -196,8 +277,6 @@ export default function TeacherExamSession() {
     setTimeLeft(originalTime);
     setIsTimerRunning(false);
     setShowTimerControls(false);
-    
-    // BROADCAST RESET TO ALL STUDENTS
     broadcastTimeUpdate(originalTime, false);
   };
 
@@ -226,25 +305,19 @@ export default function TeacherExamSession() {
     return socketRef.current && socketRef.current.connected;
   };
 
- // ==================== UTILITY FUNCTIONS ====================
-const formatTime = (seconds) => {
-  if (seconds === null || seconds === undefined) return '00:00';
-  
-  const hrs = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
-  
-  if (hrs > 0) {
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  } else {
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }
-};
-
-// Event logger utility
-const logEvent = (eventName, data) => {
-  console.log(`🎯 ${eventName} at ${new Date().toLocaleTimeString()}:`, data);
-};
+  const formatTime = (seconds) => {
+    if (seconds === null || seconds === undefined) return '00:00';
+    
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (hrs > 0) {
+      return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+  };
 
   // ==================== CHAT FUNCTIONS ====================
   const scrollToBottom = () => {
@@ -264,13 +337,11 @@ const logEvent = (eventName, data) => {
       type: 'broadcast'
     };
 
-    // Send to all students
     socketRef.current.emit('send-chat-message', {
       roomId: `exam-${examId}`,
       message: messageData
     });
 
-    // Add to local messages
     setMessages(prev => [...prev, messageData]);
     setNewMessage('');
   };
@@ -350,28 +421,28 @@ const logEvent = (eventName, data) => {
       console.log('🔌 Teacher Socket disconnected. Reason:', reason);
       setSocketStatus('disconnected');
     });
-// In the socket.on('connect') section, add:
-newSocket.on('detection-settings-update', (data) => {
-  console.log('✅ Detection settings applied to student:', data);
-});
-// In TeacherExamSession.jsx - Add this socket listener:
-newSocket.on('detection-settings-confirmation', (data) => {
-  console.log('✅ Student confirmed settings received:', {
-    studentName: data.studentName,
-    settings: data.settings,
-    receivedAt: data.receivedAt
-  });
-  alert(`✅ ${data.studentName} received the detection settings update!`);
-});
 
-// Sa useEffect ng socket setup, idagdag ito:
-newSocket.on('exam-started', (data) => {
-  console.log('✅ Exam started by teacher');
-  setSessionStarted(true);
-});
+    // Event Handlers
+    newSocket.on('detection-settings-update', (data) => {
+      console.log('✅ Detection settings applied to student:', data);
+    });
 
+    newSocket.on('detection-settings-confirmation', (data) => {
+      console.log('✅ Student confirmed settings received:', {
+        studentName: data.studentName,
+        settings: data.settings,
+        receivedAt: data.receivedAt
+      });
+      alert(`✅ ${data.studentName} received the detection settings update!`);
+    });
 
-    // Application Event Handlers
+    newSocket.on('exam-started', (data) => {
+      console.log('✅ Exam started by teacher');
+      setSessionStarted(true);
+    });
+
+    newSocket.on('proctoring-alert', handleProctoringAlert);
+
     newSocket.on('student-joined', handleStudentJoined);
     newSocket.on('student-left', handleStudentLeft);
     newSocket.on('room-participants', handleRoomParticipants);
@@ -382,7 +453,6 @@ newSocket.on('exam-started', (data) => {
     newSocket.on('chat-message', handleChatMessage);
     newSocket.on('send-detection-settings', handleDetectionSettingsUpdate);
     
-    // Handle student time requests
     newSocket.on('student-time-request', (data) => {
       console.log('🕒 Student requesting current time:', data.studentSocketId);
       newSocket.emit('send-current-time', {
@@ -405,9 +475,9 @@ newSocket.on('exam-started', (data) => {
       }
       cleanupAllConnections();
     };
-  }, [examId]);
+  }, [examId, handleProctoringAlert]);
 
-  // Handle detection settings updates from proctoring controls
+  // Handle detection settings updates
   const handleDetectionSettingsUpdate = useCallback((data) => {
     console.log('🎯 Sending detection settings to student:', data);
     
@@ -428,7 +498,6 @@ newSocket.on('exam-started', (data) => {
         setTimeLeft(prev => {
           const newTime = prev - 1;
           
-          // Auto-broadcast when time hits certain thresholds
           if (newTime === 300 || newTime === 60 || newTime === 30 || newTime === 10) {
             broadcastTimeUpdate(newTime);
           }
@@ -437,7 +506,6 @@ newSocket.on('exam-started', (data) => {
         });
       }, 1000);
     } else if (timeLeft <= 0 && isTimerRunning) {
-      // Time's up - broadcast to all students
       broadcastTimeUpdate(0, false);
       handleEndExam();
     }
@@ -484,118 +552,118 @@ newSocket.on('exam-started', (data) => {
     loadExamData();
   }, [examId, navigate]);
 
-const handleStartExam = async () => {
-  try {
-    console.log('🚀 Starting exam session...');
-    
-    const response = await startExamSession(examId);
-    if (response.success) {
-      setSessionStarted(true);
-      setIsTimerRunning(true);
-      console.log('✅ Exam session started successfully');
+  const handleStartExam = async () => {
+    try {
+      console.log('🚀 Starting exam session...');
       
-      // BROADCAST EXAM START TO ALL STUDENTS
-      if (socketRef.current) {
-        console.log('📢 Broadcasting exam start to students...');
+      const response = await startExamSession(examId);
+      if (response.success) {
+        setSessionStarted(true);
+        setIsTimerRunning(true);
+        console.log('✅ Exam session started successfully');
         
-        const startData = {
-          roomId: `exam-${examId}`,
-          examId: examId,
-          examTitle: exam?.title || 'Exam',
-          timestamp: new Date().toISOString(),
-          requiresCamera: true,
-          requiresMicrophone: true
-        };
+        // BROADCAST EXAM START TO ALL STUDENTS
+        if (socketRef.current) {
+          console.log('📢 Broadcasting exam start to students...');
+          
+          const startData = {
+            roomId: `exam-${examId}`,
+            examId: examId,
+            examTitle: exam?.title || 'Exam',
+            timestamp: new Date().toISOString(),
+            requiresCamera: true,
+            requiresMicrophone: true
+          };
+          
+          console.log('🎯 Sending exam-started event:', startData);
+          
+          socketRef.current.emit('exam-started', startData);
+          
+          const connectedStudents = students.filter(student => student.socketId);
+          connectedStudents.forEach(student => {
+            if (student.socketId) {
+              socketRef.current.emit('exam-started', {
+                ...startData,
+                targetStudent: student.socketId
+              });
+            }
+          });
+        }
         
-        console.log('🎯 Sending exam-started event:', startData);
-        
-        // Broadcast to entire room
-        socketRef.current.emit('exam-started', startData);
-        
-        // Also send to each connected student individually for redundancy
-        const connectedStudents = students.filter(student => student.socketId);
-        connectedStudents.forEach(student => {
-          if (student.socketId) {
-            socketRef.current.emit('exam-started', {
-              ...startData,
-              targetStudent: student.socketId
-            });
-          }
-        });
-      }
-      
-      // BROADCAST INITIAL TIME TO ALL STUDENTS
-      setTimeout(() => {
-        broadcastTimeUpdate(timeLeft, true);
-      }, 1000);
-      
-      // Request cameras for currently connected students
-      const connectedStudents = students.filter(student => student.socketId);
-      console.log(`📹 Requesting cameras from ${connectedStudents.length} connected students`);
-      
-      connectedStudents.forEach((student, index) => {
+        // BROADCAST INITIAL TIME
         setTimeout(() => {
-          requestStudentCamera(student.socketId);
-        }, 1000 + (index * 1000));
-      });
-      
-      alert('✅ Exam started! Students can now see the quiz.');
-    } else {
-      alert('❌ Failed to start exam session');
+          broadcastTimeUpdate(timeLeft, true);
+        }, 1000);
+        
+        // Request cameras for connected students
+        const connectedStudents = students.filter(student => student.socketId);
+        console.log(`📹 Requesting cameras from ${connectedStudents.length} connected students`);
+        
+        connectedStudents.forEach((student, index) => {
+          setTimeout(() => {
+            requestStudentCamera(student.socketId);
+          }, 1000 + (index * 1000));
+        });
+        
+        alert('✅ Exam started! Students can now see the quiz.');
+      } else {
+        alert('❌ Failed to start exam session');
+      }
+    } catch (error) {
+      console.error('Failed to start exam:', error);
+      alert('Failed to start exam session');
     }
-  } catch (error) {
-    console.error('Failed to start exam:', error);
-    alert('Failed to start exam session');
-  }
-};
+  };
 
-const handleEndExam = async () => {
-  try {
-    console.log('🛑 Ending exam session and disconnecting all students...');
-    
-    // BROADCAST EXAM END TO ALL STUDENTS
-    if (socketRef.current) {
-      socketRef.current.emit('exam-ended', {
-        roomId: `exam-${examId}`,
-        message: 'Exam has been ended by teacher',
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    // Disconnect all students manually
-    const connectedStudents = students.filter(student => student.socketId);
-    connectedStudents.forEach(student => {
+  const handleEndExam = async () => {
+    try {
+      console.log('🛑 Ending exam session and disconnecting all students...');
+      
+      // BROADCAST EXAM END TO ALL STUDENTS
       if (socketRef.current) {
-        socketRef.current.emit('disconnect-student', {
-          studentSocketId: student.socketId,
-          reason: 'Exam ended by teacher',
-          examId: examId
+        socketRef.current.emit('exam-ended', {
+          roomId: `exam-${examId}`,
+          message: 'Exam has been ended by teacher',
+          timestamp: new Date().toISOString()
         });
       }
-    });
-    
-    cleanupAllConnections();
-    
-    const response = await endExamSession(examId);
-    if (response.success) {
-      setSessionStarted(false);
-      setIsTimerRunning(false);
-      setStudents([]);
-      setStudentStreams({});
-      setPeerConnections({});
-      setMessages([]);
-      alert('✅ Exam ended! All students have been disconnected.');
+      
+      // Disconnect all students
+      const connectedStudents = students.filter(student => student.socketId);
+      connectedStudents.forEach(student => {
+        if (socketRef.current) {
+          socketRef.current.emit('disconnect-student', {
+            studentSocketId: student.socketId,
+            reason: 'Exam ended by teacher',
+            examId: examId
+          });
+        }
+      });
+      
+      cleanupAllConnections();
+      
+      const response = await endExamSession(examId);
+      if (response.success) {
+        setSessionStarted(false);
+        setIsTimerRunning(false);
+        setStudents([]);
+        setStudentStreams({});
+        setPeerConnections({});
+        setMessages([]);
+        setProctoringAlerts({});
+        setExpandedAlerts({});
+        alert('✅ Exam ended! All students have been disconnected.');
+      }
+    } catch (error) {
+      console.error('Failed to end exam:', error);
+      alert('Failed to end exam session');
     }
-  } catch (error) {
-    console.error('Failed to end exam:', error);
-    alert('Failed to end exam session');
-  }
-};
+  };
+
   // ==================== WEBRTC HANDLERS ====================
   const handleWebRTCOffer = async (data) => {
     console.log('🎯 Received WebRTC offer from:', data.from);
     
-    // Clean up existing connection
     if (peerConnections[data.from]) {
       cleanupStudentConnection(data.from);
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -782,7 +850,9 @@ const handleEndExam = async () => {
           _id: String(data.studentId || data.socketId),
           isConnected: true,
           connectionStatus: 'connected',
-          lastSeen: new Date()
+          lastSeen: new Date(),
+          hasAlerts: false,
+          alertCount: 0
         }];
       }
       return prev.map(student => 
@@ -797,7 +867,6 @@ const handleEndExam = async () => {
       );
     });
 
-    // Request camera after student joins
     setTimeout(() => {
       requestStudentCamera(data.socketId);
     }, 1000);
@@ -831,11 +900,12 @@ const handleEndExam = async () => {
         _id: String(student.studentId || student.socketId),
         isConnected: true,
         connectionStatus: 'connected',
-        lastSeen: new Date()
+        lastSeen: new Date(),
+        hasAlerts: false,
+        alertCount: 0
       }));
       setStudents(formattedStudents);
 
-      // Request cameras for all connected students
       formattedStudents.forEach((student, index) => {
         setTimeout(() => {
           requestStudentCamera(student.socketId);
@@ -854,37 +924,35 @@ const handleEndExam = async () => {
   };
 
   // ==================== CAMERA REQUEST MANAGEMENT ====================
- const requestStudentCamera = (studentSocketId) => {
-  if (!isSocketConnected() || !studentSocketId) {
-    console.warn('⚠️ Socket not connected for camera request');
-    return;
-  }
+  const requestStudentCamera = (studentSocketId) => {
+    if (!isSocketConnected() || !studentSocketId) {
+      console.warn('⚠️ Socket not connected for camera request');
+      return;
+    }
 
-  if (studentStreams[studentSocketId]) {
-    console.log('✅ Already have stream for:', studentSocketId);
-    return;
-  }
+    if (studentStreams[studentSocketId]) {
+      console.log('✅ Already have stream for:', studentSocketId);
+      return;
+    }
 
-  if (activeConnections.current.has(studentSocketId)) {
-    console.log('⏳ Already processing camera for:', studentSocketId);
-    return;
-  }
+    if (activeConnections.current.has(studentSocketId)) {
+      console.log('⏳ Already processing camera for:', studentSocketId);
+      return;
+    }
 
-  console.log('📹 Requesting camera from student:', studentSocketId);
-  activeConnections.current.add(studentSocketId);
-  
-  // Send camera request to student
-  socketRef.current.emit('request-student-camera', {
-    studentSocketId: studentSocketId,
-    roomId: `exam-${examId}`,
-    teacherSocketId: socketRef.current.id
-  });
-  
-  // Remove from pending after 15 seconds
-  setTimeout(() => {
-    activeConnections.current.delete(studentSocketId);
-  }, 15000);
-};
+    console.log('📹 Requesting camera from student:', studentSocketId);
+    activeConnections.current.add(studentSocketId);
+    
+    socketRef.current.emit('request-student-camera', {
+      studentSocketId: studentSocketId,
+      roomId: `exam-${examId}`,
+      teacherSocketId: socketRef.current.id
+    });
+    
+    setTimeout(() => {
+      activeConnections.current.delete(studentSocketId);
+    }, 15000);
+  };
 
   // ==================== CONNECTION CLEANUP ====================
   const cleanupStudentConnection = (socketId) => {
@@ -946,7 +1014,6 @@ const handleEndExam = async () => {
 
   // ==================== RENDER FUNCTIONS ====================
   
-  // Only show connected students
   const connectedStudents = students.filter(student => student.socketId && student.isConnected);
 
   // Timer Controls Component
@@ -1098,7 +1165,7 @@ const handleEndExam = async () => {
             <TeacherProctoringControls 
               examId={examId}
               socket={socketRef.current}
-              students={[selectedStudent]} // Only show controls for selected student
+              students={[selectedStudent]}
               onDetectionSettingsChange={(settings) => {
                 console.log('Detection settings updated for student:', selectedStudent.name, settings);
               }}
@@ -1109,11 +1176,104 @@ const handleEndExam = async () => {
     );
   };
 
+  // ✅ RENDER PROCTORING ALERTS IN VIDEO FOOTER
+  const renderProctoringAlerts = (student) => {
+    const studentAlerts = proctoringAlerts[student.socketId] || [];
+    const isExpanded = expandedAlerts[student.socketId];
+    
+    console.log(`📊 Rendering alerts for ${student.name}:`, studentAlerts.length, 'alerts');
+
+    if (studentAlerts.length === 0) {
+      return (
+        <div className="no-alerts-message">
+          <span className="alert-icon">✅</span>
+          No alerts
+        </div>
+      );
+    }
+
+    return (
+      <div className="proctoring-alerts-footer">
+        <div 
+          className="alerts-header"
+          onClick={() => {
+            console.log('📂 Toggling alerts for:', student.name);
+            toggleAlertsDropdown(student.socketId);
+          }}
+        >
+          <div className="alerts-summary">
+            <span className="alert-icon">🚨</span>
+            <span className="alert-count">{studentAlerts.length} alert(s)</span>
+            <span className="latest-alert-time">
+              Latest: {studentAlerts[0]?.timestamp}
+            </span>
+          </div>
+          <div className="alerts-controls">
+            <button 
+              className="clear-alerts-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log('🗑️ Clearing alerts for:', student.name);
+                clearStudentAlerts(student.socketId, e);
+              }}
+              title="Clear all alerts"
+            >
+              🗑️
+            </button>
+            <span className="dropdown-arrow">
+              {isExpanded ? '▲' : '▼'}
+            </span>
+          </div>
+        </div>
+        
+        {isExpanded && (
+          <div className="alerts-dropdown">
+            <div className="alerts-list">
+              {studentAlerts.map((alert, index) => (
+                <div key={alert.id || index} className={`alert-item ${alert.type}`}>
+                  <div className="alert-icon-small">
+                    {alert.type === 'warning' ? '⚠️' : 
+                     alert.type === 'danger' ? '🚨' : 'ℹ️'}
+                  </div>
+                  <div className="alert-content">
+                    <div className="alert-message">{alert.message}</div>
+                    <div className="alert-time">{alert.timestamp}</div>
+                    {alert.details && (
+                      <div className="alert-details">
+                        {JSON.stringify(alert.details)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="alerts-footer">
+              <span className="total-alerts">Total: {studentAlerts.length} alerts</span>
+              <button 
+                className="test-alert-btn"
+                onClick={() => {
+                  handleProctoringAlert({
+                    studentSocketId: student.socketId,
+                    message: 'TEST ALERT: System is working',
+                    type: 'warning',
+                    severity: 'medium',
+                    timestamp: new Date().toLocaleTimeString()
+                  });
+                }}
+              >
+                Test Alert
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderStudentVideos = () => {
     const studentsWithStreams = connectedStudents
       .filter(student => studentStreams[student.socketId])
       .sort((a, b) => getSafeStudentName(a).localeCompare(getSafeStudentName(b)));
-
 
     if (studentsWithStreams.length === 0) {
       return (
@@ -1121,8 +1281,6 @@ const handleEndExam = async () => {
           <div className="empty-state">
             <div className="camera-icon"></div>
             <h4>No one is here</h4>
-            
-          
           </div>
         </div>
       );
@@ -1166,11 +1324,18 @@ const handleEndExam = async () => {
                   />
                 </div>
                 
+                {/* ✅ VIDEO FOOTER WITH PROCTORING ALERTS */}
                 <div className="video-footer">
                   <div className="student-info-compact">
                     <span className="student-id">ID: {getSafeStudentId(student)}</span>
                     <span className="connection-type">🟢 Online</span>
                   </div>
+                  
+                  {/* ✅ PROCTORING ALERTS SECTION */}
+                  <div className="proctoring-alerts-section">
+                    {renderProctoringAlerts(student)}
+                  </div>
+                  
                   <button 
                     onClick={() => requestStudentCamera(socketId)}
                     className="retry-camera-btn"
@@ -1318,7 +1483,7 @@ const handleEndExam = async () => {
         </div>
       </div>
 
-      {/* UPDATED: Main Content Layout - Videos Only */}
+      {/* Main Content Layout - Videos Only */}
       <div className="teacher-exam-content-compact">
         {/* Videos Column Only */}
         <div className="content-column videos-column-full">

@@ -17,6 +17,7 @@ import tempfile
 import threading
 from collections import deque
 import time
+import requests  # IDAGDAG ITO SA IMPORTS
 from collections import defaultdict
 
 
@@ -677,11 +678,12 @@ def process_audio():
         print(f"Audio processing error: {e}")
         return jsonify({"error": str(e)}), 500
 
+# Sa server.py, palitan ang send_detection_to_teacher function:
+import requests  # IDAGDAG ITO SA IMPORTS
+
 def send_detection_to_teacher(exam_id, student_socket_id, detection_data):
-    """Send detection alerts to teacher for specific exam"""
+    """Send detection alerts to teacher via HTTP API"""
     try:
-        room = f"exam-{exam_id}"
-        
         alert_data = {
             "studentSocketId": student_socket_id,
             "message": detection_data.get("message", "Suspicious activity detected"),
@@ -691,17 +693,29 @@ def send_detection_to_teacher(exam_id, student_socket_id, detection_data):
             "details": detection_data.get("details", {}),
             "confidence": detection_data.get("confidence", 0.0),
             "detectionType": detection_data.get("detectionType", "unknown"),
+            "examId": exam_id,
             "source": "python_backend"
         }
         
-        # Send to teacher
-        sio.emit('proctoring-alert', alert_data, room=room)
-        print(f"📤 Sent detection alert to teacher: {alert_data}")
+        # ✅ FIX: Use HTTP API instead of direct socket
+        response = requests.post(
+            'http://localhost:3000/api/proctoring-alert',
+            json=alert_data,
+            headers={'Content-Type': 'application/json'},
+            timeout=5
+        )
         
+        if response.status_code == 200:
+            print(f"✅ Proctoring alert sent to teacher via API: {alert_data['message']}")
+        else:
+            print(f"❌ Failed to send alert: {response.status_code}")
+            
     except Exception as e:
         print(f"❌ Error sending detection to teacher: {e}")
 
 # THIS LINE SHOULD BE AT THE SAME INDENT LEVEL AS THE PREVIOUS FUNCTION
+# Sa /detect endpoint, hanapin ang actual socket ID:
+# SA server.py, i-debug kung nakukuha ang socket ID:
 @app.route('/detect', methods=['POST'])
 def detect():
     try:
@@ -713,15 +727,29 @@ def detect():
         if not data or 'image' not in data:
             return jsonify({"error": "No image data provided"}), 400
         
-            
-        # Extract data
+        # ✅ GET DATA
         detection_settings = data.get('detection_settings', {})
         exam_id = data.get('exam_id', 'unknown-exam')
         student_id = data.get('student_id', 'unknown-student')
-        student_socket_id = data.get('student_socket_id', 'unknown-socket')
+        student_socket_id = data.get('student_socket_id', 'unknown-socket')  # ✅ ITO ANG BAGO
         
-        print(f"📊 Detection settings: {detection_settings}")
+        print(f"📊 Student Socket ID from request: {student_socket_id}")
         print(f"🎓 Exam: {exam_id}, Student: {student_id}, Socket: {student_socket_id}")
+        
+        # ✅ DOUBLE CHECK SA CONNECTED CLIENTS
+        actual_socket_id = None
+        for sid, client_data in connected_clients.items():
+            if client_data.get('exam_id') == exam_id and client_data.get('user_role') == 'student':
+                actual_socket_id = sid
+                break
+        
+        print(f"🔍 Actual socket ID from connected clients: {actual_socket_id}")
+        
+        # Use the one from request as fallback
+        final_socket_id = student_socket_id if student_socket_id != 'unknown-socket' else actual_socket_id
+        print(f"🎯 Using socket ID: {final_socket_id}")
+        
+        # ... rest of the function
         
         # ✅ CHECK IF ALL DETECTIONS ARE DISABLED - RETURN EARLY
         if detection_settings and not any([

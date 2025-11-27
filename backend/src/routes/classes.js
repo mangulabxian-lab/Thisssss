@@ -109,10 +109,12 @@ router.post("/join", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ Get user's classes (both owned and joined) - EXCLUDE ARCHIVED
+// ✅ Get user's classes (both owned and joined) - EXCLUDE ARCHIVED - FIXED VERSION
 router.get("/my-classes", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
+
+    console.log(`📚 Getting classes for user ${userId}`);
 
     const classes = await Class.find({
       $or: [
@@ -125,20 +127,46 @@ router.get("/my-classes", authMiddleware, async (req, res) => {
     .populate("members.userId", "name email profileImage") // ✅ ADD PROFILE IMAGE
     .sort({ createdAt: -1 });
 
-    // Add role context for each class
+    console.log(`✅ Found ${classes.length} classes`);
+
+    // ✅ FIX: Add null checking for populated fields
     const classesWithRole = classes.map(classData => {
-      const isOwner = classData.ownerId._id.toString() === userId;
-      const member = classData.members.find(m => m.userId._id.toString() === userId);
+      // Check if ownerId is populated properly - ADD NULL CHECK
+      const isOwner = classData.ownerId && 
+                     classData.ownerId._id && 
+                     classData.ownerId._id.toString() === userId;
       
+      // Find member with null checking - ADD NULL CHECK
+      let member = null;
+      if (classData.members && Array.isArray(classData.members)) {
+        member = classData.members.find(m => 
+          m.userId && m.userId._id && m.userId._id.toString() === userId
+        );
+      }
+
       return {
-        ...classData._doc,
+        _id: classData._id,
+        name: classData.name,
+        code: classData.code,
+        ownerId: classData.ownerId,
+        members: classData.members,
+        createdAt: classData.createdAt,
+        updatedAt: classData.updatedAt,
+        isArchived: classData.isArchived,
         userRole: isOwner ? "teacher" : (member?.role || "student")
       };
     });
 
+    // ✅ FIX: Filter out any classes with null owner (corrupted data)
+    const validClasses = classesWithRole.filter(classData => 
+      classData.ownerId && classData.ownerId._id
+    );
+
+    console.log(`✅ Returning ${validClasses.length} valid classes`);
+
     res.json({
       success: true,
-      data: classesWithRole
+      data: validClasses
     });
   } catch (err) {
     console.error("❌ Get my classes error:", err);

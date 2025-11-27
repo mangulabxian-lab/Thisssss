@@ -41,6 +41,9 @@ const io = new Server(server, {
   pingInterval: 10000
 });
 
+
+
+
 // ===== MIDDLEWARES =====
 app.use(cors({ 
   origin: [
@@ -93,6 +96,36 @@ app.get("/api/debug-routes", (req, res) => {
     routes: routes
   });
 });
+
+
+// Sa server.js, idagdag ito bago ang health check:
+app.post('/api/proctoring-alert', async (req, res) => {
+  try {
+    const alertData = req.body;
+    console.log('🚨 Received proctoring alert from Python:', alertData);
+
+    const { examId, studentSocketId, message, type, severity } = alertData;
+    
+    if (!examId) {
+      return res.status(400).json({ error: 'examId is required' });
+    }
+
+    // Broadcast to teacher room
+    io.to(`exam-${examId}`).emit('proctoring-alert', {
+      ...alertData,
+      timestamp: new Date().toISOString(),
+      source: 'python_backend'
+    });
+
+    console.log(`✅ Proctoring alert forwarded to exam-${examId}`);
+    res.json({ success: true, message: 'Alert forwarded' });
+    
+  } catch (error) {
+    console.error('❌ Error forwarding proctoring alert:', error);
+    res.status(500).json({ error: 'Failed to forward alert' });
+  }
+});
+
 
 // ===== HEALTH CHECK =====
 app.get("/api/health", (req, res) => {

@@ -49,59 +49,58 @@ export default function TeacherExamSession() {
   const messagesEndRef = useRef(null);
 
   // ==================== PROCTORING ALERTS FUNCTIONS ====================
-  const handleProctoringAlert = useCallback((data) => {
-    console.log('🚨 Teacher received proctoring alert:', data);
+ // PALITAN ang handleProctoringAlert function:
+const handleProctoringAlert = useCallback((data) => {
+  console.log('🚨 Teacher received proctoring alert:', data);
+  
+  if (!data.studentSocketId) {
+    console.error('❌ No student socket ID in proctoring alert');
+    return;
+  }
+
+  // ✅ FIX: Use functional update to avoid students dependency
+  setStudents(prevStudents => {
+    const student = prevStudents.find(s => s.socketId === data.studentSocketId);
+    console.log('🔍 Found student for alert:', student);
     
-    if (!data.studentSocketId) {
-      console.error('❌ No student socket ID in proctoring alert');
-      return;
+    if (!student) {
+      console.log('❌ No student found with socket ID:', data.studentSocketId);
+      console.log('📋 Available students:', prevStudents.map(s => ({ name: s.name, socketId: s.socketId })));
+      return prevStudents; // Return unchanged if student not found
     }
+    
+    return prevStudents;
+  });
 
-    const alertMessage = data.message || 'Suspicious activity detected';
-    const messageString = typeof alertMessage === 'string' ? alertMessage : String(alertMessage);
+  const alertMessage = data.message || 'Suspicious activity detected';
+  const messageString = typeof alertMessage === 'string' ? alertMessage : String(alertMessage);
 
-    const newAlert = {
-      id: Date.now() + Math.random(),
-      message: messageString,
-      type: data.type || 'warning',
-      severity: data.severity || 'medium',
-      timestamp: new Date().toLocaleTimeString(),
-      details: data.details || {},
-      studentSocketId: data.studentSocketId
+  const newAlert = {
+    id: Date.now() + Math.random(),
+    message: messageString,
+    type: data.type || 'warning',
+    severity: data.severity || 'medium',
+    timestamp: new Date().toLocaleTimeString(),
+    details: data.details || {},
+    studentSocketId: data.studentSocketId
+  };
+
+  console.log('📝 Storing alert for student:', data.studentSocketId, newAlert);
+
+  // ✅ FIX: Use functional update for proctoringAlerts
+  setProctoringAlerts(prev => {
+    const studentAlerts = prev[data.studentSocketId] || [];
+    return {
+      ...prev,
+      [data.studentSocketId]: [
+        newAlert,
+        ...studentAlerts.slice(0, 19)
+      ]
     };
+  });
 
-    console.log('📝 Storing alert for student:', data.studentSocketId, newAlert);
-
-    setProctoringAlerts(prev => {
-      const studentAlerts = prev[data.studentSocketId] || [];
-      const updatedAlerts = {
-        ...prev,
-        [data.studentSocketId]: [
-          newAlert,
-          ...studentAlerts.slice(0, 19)
-        ]
-      };
-      return updatedAlerts;
-    });
-
-    // Update student status
-    setStudents(prev => prev.map(student => {
-      if (student.socketId === data.studentSocketId) {
-        const currentAlerts = proctoringAlerts[data.studentSocketId] || [];
-        const newAlertCount = currentAlerts.length + 1;
-        
-        return { 
-          ...student, 
-          hasAlerts: true,
-          lastAlert: newAlert.timestamp,
-          alertCount: newAlertCount
-        };
-      }
-      return student;
-    }));
-
-    console.log('🔔 Alert processed successfully for teacher view:', messageString);
-  }, [proctoringAlerts]);
+  console.log('🔔 Alert processed successfully for teacher view:', messageString);
+}, []); // ✅ EMPTY DEPENDENCIES - NO MORE INFINITE LOOP
 
   // ==================== ALERTS MANAGEMENT FUNCTIONS ====================
   const toggleAlertsDropdown = (studentSocketId) => {
@@ -743,7 +742,7 @@ const handleSendMessage = (e) => {
       }
       cleanupAllConnections();
     };
-  }, [examId, handleProctoringAlert]);
+  }, [examId,]);
 
   // Handle detection settings updates
   const handleDetectionSettingsUpdate = useCallback((data) => {
@@ -758,6 +757,27 @@ const handleSendMessage = (e) => {
       });
     }
   }, [examId]);
+
+
+  // DAGDAGIN ito after the main socket effect:
+useEffect(() => {
+  if (!socketRef.current) return;
+
+  // ✅ Add proctoring alert listener separately
+  const currentSocket = socketRef.current;
+  
+  const proctoringHandler = (data) => {
+    handleProctoringAlert(data);
+  };
+  
+  currentSocket.on('proctoring-alert', proctoringHandler);
+  
+  return () => {
+    if (currentSocket) {
+      currentSocket.off('proctoring-alert', proctoringHandler);
+    }
+  };
+}, [handleProctoringAlert]); // ✅ Now this is safe
 
   // ==================== EXAM SESSION MANAGEMENT ====================
   useEffect(() => {
@@ -1311,99 +1331,104 @@ const handleSendMessage = (e) => {
     );
   };
 
-  // ✅ RENDER PROCTORING ALERTS IN VIDEO FOOTER
-  const renderProctoringAlerts = (student) => {
-    const studentAlerts = proctoringAlerts[student.socketId] || [];
-    const isExpanded = expandedAlerts[student.socketId];
-    
-    console.log(`📊 Rendering alerts for ${student.name}:`, studentAlerts.length, 'alerts');
-
-    if (studentAlerts.length === 0) {
-      return (
-        <div className="no-alerts-message">
-          <span className="alert-icon">✅</span>
-          No alerts
-        </div>
-      );
-    }
-
+// ✅ IMPROVED PROCTORING ALERTS RENDER FUNCTION - INTEGRATED IN FOOTER
+const renderProctoringAlerts = (student) => {
+  const studentAlerts = proctoringAlerts[student.socketId] || [];
+  const isExpanded = expandedAlerts[student.socketId];
+  
+  if (studentAlerts.length === 0) {
     return (
-      <div className="proctoring-alerts-footer">
-        <div 
-          className="alerts-header"
-          onClick={() => {
-            console.log('📂 Toggling alerts for:', student.name);
-            toggleAlertsDropdown(student.socketId);
-          }}
-        >
-          <div className="alerts-summary">
-            <span className="alert-icon">🚨</span>
-            <span className="alert-count">{studentAlerts.length} alert(s)</span>
-            <span className="latest-alert-time">
-              Latest: {studentAlerts[0]?.timestamp}
-            </span>
-          </div>
-          <div className="alerts-controls">
-            <button 
-              className="clear-alerts-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                console.log('🗑️ Clearing alerts for:', student.name);
-                clearStudentAlerts(student.socketId, e);
-              }}
-              title="Clear all alerts"
-            >
-              🗑️
-            </button>
-            <span className="dropdown-arrow">
-              {isExpanded ? '▲' : '▼'}
-            </span>
-          </div>
-        </div>
-        
-        {isExpanded && (
-          <div className="alerts-dropdown">
-            <div className="alerts-list">
-              {studentAlerts.map((alert, index) => (
-                <div key={alert.id || index} className={`alert-item ${alert.type}`}>
-                  <div className="alert-icon-small">
-                    {alert.type === 'warning' ? '⚠️' : 
-                     alert.type === 'danger' ? '🚨' : 'ℹ️'}
-                  </div>
-                  <div className="alert-content">
-                    <div className="alert-message">{alert.message}</div>
-                    <div className="alert-time">{alert.timestamp}</div>
-                    {alert.details && (
-                      <div className="alert-details">
-                        {JSON.stringify(alert.details)}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="alerts-footer">
-              <span className="total-alerts">Total: {studentAlerts.length} alerts</span>
-              <button 
-                className="test-alert-btn"
-                onClick={() => {
-                  handleProctoringAlert({
-                    studentSocketId: student.socketId,
-                    message: 'TEST ALERT: System is working',
-                    type: 'warning',
-                    severity: 'medium',
-                    timestamp: new Date().toLocaleTimeString()
-                  });
-                }}
-              >
-                Test Alert
-              </button>
-            </div>
-          </div>
-        )}
+      <div className="no-alerts-message">
+        <span className="alert-icon">✅</span>
+        No alerts
       </div>
     );
-  };
+  }
+
+  return (
+    <div className="proctoring-alerts-footer">
+      <div 
+        className={`alerts-header ${isExpanded ? 'expanded' : ''}`}
+        onClick={() => toggleAlertsDropdown(student.socketId)}
+      >
+        <div className="alerts-summary">
+          <span className="alert-icon">🚨</span>
+          <span className="alert-count">{studentAlerts.length}</span>
+          <span className="latest-alert-time">
+            {studentAlerts[0]?.timestamp}
+          </span>
+        </div>
+        <div className="alerts-controls">
+          <button 
+            className="clear-alerts-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              clearStudentAlerts(student.socketId, e);
+            }}
+            title="Clear all alerts"
+          >
+            🗑️
+          </button>
+          <span className="dropdown-arrow">
+            {isExpanded ? '▲' : '▼'}
+          </span>
+        </div>
+      </div>
+      
+      {isExpanded && (
+        <div className="alerts-dropdown">
+          <div className="alerts-list">
+            {studentAlerts.slice(0, 5).map((alert, index) => (
+              <div key={alert.id || index} className={`alert-item ${alert.type} ${alert.severity === 'critical' ? 'critical' : ''}`}>
+                <div className="alert-icon-small">
+                  {alert.type === 'warning' ? '⚠️' : 
+                   alert.type === 'danger' ? '🚨' : 
+                   alert.type === 'critical' ? '🔴' : 'ℹ️'}
+                </div>
+                <div className="alert-content">
+                  <div className="alert-message">
+                    {alert.severity && (
+                      <span className={`alert-severity ${alert.severity}`}></span>
+                    )}
+                    {alert.message}
+                  </div>
+                  <div className="alert-time">{alert.timestamp}</div>
+                </div>
+              </div>
+            ))}
+            {studentAlerts.length > 5 && (
+              <div className="alert-item info">
+                <div className="alert-content">
+                  <div className="alert-message">
+                    ...and {studentAlerts.length - 5} more alerts
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="alerts-footer">
+            <span className="total-alerts">{studentAlerts.length} total</span>
+            <button 
+              className="test-alert-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleProctoringAlert({
+                  studentSocketId: student.socketId,
+                  message: 'Test alert - system working',
+                  type: 'info',
+                  severity: 'low',
+                  timestamp: new Date().toLocaleTimeString()
+                });
+              }}
+            >
+              Test
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
   const renderStudentVideos = () => {
     const studentsWithStreams = connectedStudents

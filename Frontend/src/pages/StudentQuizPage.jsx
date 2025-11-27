@@ -587,7 +587,8 @@ const CameraComponent = React.memo(({
   onCameraStateChange,
   onProctoringAlert,
   examId,
-  teacherDetectionSettings
+  teacherDetectionSettings,
+  socketRef
 }) => {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -601,7 +602,7 @@ const CameraComponent = React.memo(({
 
   const captureIntervalRef = useRef(null);
   
-// In your captureFrame function in CameraComponent
+// SA StudentQuizPage.jsx, PALITAN ang captureFrame function:
 const captureFrame = useCallback(async () => {
   if (!videoRef.current || !requiresCamera || !cameraState.isConnected || !camOn) return;
   
@@ -620,17 +621,19 @@ const captureFrame = useCallback(async () => {
     
     const imageData = canvas.toDataURL('image/jpeg', 0.8);
     
-    // ✅ CRITICAL: Send detection settings to backend
-    const detectionData = {
-      image: imageData,
-      exam_id: examId,
-      student_id: 'student-user',
-      timestamp: new Date().toISOString(),
-      // ✅ THIS IS THE KEY - send the actual settings object
-      detection_settings: teacherDetectionSettings
-    };
-    
-    console.log('📊 Sending detection with settings:', teacherDetectionSettings);
+    // ✅ FIX: Use the actual socket ID safely
+   const studentSocketId = socketRef.current?.id || 'unknown-socket';
+      
+      const detectionData = {
+        image: imageData,
+        exam_id: examId,
+        student_id: 'student-user',
+        student_socket_id: studentSocketId,
+        timestamp: new Date().toISOString(),
+        detection_settings: teacherDetectionSettings
+      };
+      
+      console.log('📊 Sending detection with socket ID:', studentSocketId);
     
     const response = await fetch('http://localhost:5000/detect', {
       method: 'POST',
@@ -669,7 +672,7 @@ const captureFrame = useCallback(async () => {
   } catch (error) {
     console.error('Proctoring capture error:', error);
   }
-}, [requiresCamera, examId, onProctoringAlert, cameraState.isConnected, camOn, teacherDetectionSettings]);
+}, [requiresCamera, examId, onProctoringAlert, cameraState.isConnected, camOn, teacherDetectionSettings, socketRef]);
   
   const startProctoring = useCallback(() => {
     if (!requiresCamera || !cameraState.isConnected) return;
@@ -2272,6 +2275,7 @@ if (permissionsGranted && !examStarted) {
     onProctoringAlert={handleProctoringAlert}
     examId={examId}
     teacherDetectionSettings={teacherDetectionSettings}
+     socketRef={socketRef} // ✅ IDAGDAG ITO
   />
 )}
 

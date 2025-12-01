@@ -279,12 +279,7 @@
   display: inline-block;
 }
 
-.classwork-description {
-  color: #5f6368;
-  margin: 0 0 16px 0;
-  font-size: 14px;
-  line-height: 1.5;
-}
+
 
 .classwork-meta {
   display: flex;

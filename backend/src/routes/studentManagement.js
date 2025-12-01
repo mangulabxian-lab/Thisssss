@@ -6,7 +6,7 @@ const Class = require("../models/Class");
 const User = require("../models/User");
 const authMiddleware = require("../middleware/authMiddleware");
 
-// ✅ GET ALL STUDENTS IN CLASS (with mute status)
+// ✅ GET ALL STUDENTS IN CLASS (with profile images)
 router.get("/:classId/students", authMiddleware, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -21,8 +21,8 @@ router.get("/:classId/students", authMiddleware, async (req, res) => {
     }
 
     const classData = await Class.findById(classId)
-      .populate("ownerId", "name email")
-      .populate("members.userId", "name email");
+      .populate("ownerId", "name email profileImage") // ✅ ADD profileImage
+      .populate("members.userId", "name email profileImage"); // ✅ ADD profileImage
 
     if (!classData) {
       return res.status(404).json({ 
@@ -40,26 +40,35 @@ router.get("/:classId/students", authMiddleware, async (req, res) => {
       });
     }
 
-    // Format students data
+    // ✅ FIXED: Format teachers data with profile images
+    const teachers = [{
+      _id: classData.ownerId._id,
+      name: classData.ownerId.name,
+      email: classData.ownerId.email,
+      profileImage: classData.ownerId.profileImage, // ✅ ADDED
+      role: "teacher",
+      joinedAt: classData.createdAt
+    }];
+
+    // ✅ FIXED: Format students data with profile images
     const students = classData.members
       .filter(member => member.role === "student")
       .map(member => ({
         _id: member.userId._id,
         name: member.userId.name,
         email: member.userId.email,
+        profileImage: member.userId.profileImage, // ✅ ADDED
         role: member.role,
         joinedAt: member.joinedAt,
         isMuted: member.isMuted || false
       }));
 
-    // Format teachers data
-    const teachers = [{
-      _id: classData.ownerId._id,
-      name: classData.ownerId.name,
-      email: classData.ownerId.email,
-      role: "teacher",
-      joinedAt: classData.createdAt
-    }];
+    console.log('👥 People data fetched:', {
+      teachers: teachers.length,
+      students: students.length,
+      teachersWithImages: teachers.filter(t => t.profileImage).length,
+      studentsWithImages: students.filter(s => s.profileImage).length
+    });
 
     res.json({
       success: true,

@@ -4825,7 +4825,7 @@ a:focus {
   padding: 20px;
   transition: box-shadow 0.2s;
   width: 1000px;
-  height: 100px;
+  height: px;
 }
 
 .classwork-card:hover {
@@ -4839,10 +4839,6 @@ a:focus {
   margin-bottom: 12px;
 }
 
-.classwork-icon {
-  font-size: 24px;
-  margin-top: 4px;
-}
 
 .classwork-header h3 {
   margin: 0 0 4px 0;
@@ -4856,11 +4852,6 @@ a:focus {
   text-transform: capitalize;
 }
 
-.classwork-description {
-  color: #5f6368;
-  margin-bottom: 12px;
-  line-height: 1.4;
-}
 
 .classwork-meta {
   display: flex;
@@ -5015,13 +5006,7 @@ a:focus {
 }
 
 /* Role indicator section */
-.role-indicator {
-  margin-top: 10px;
-  padding: 12px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-}
+
 
 /* Classwork header improvements */
 .classwork-header-section {
@@ -5306,10 +5291,6 @@ a:focus {
   margin-bottom: 12px;
 }
 
-.classwork-icon {
-  font-size: 1.5rem;
-  flex-shrink: 0;
-}
 
 .classwork-title-section {
   flex: 1;
@@ -5332,11 +5313,6 @@ a:focus {
   display: inline-block;
 }
 
-.classwork-description {
-  color: #5f6368;
-  margin: 0 0 12px 0;
-  line-height: 1.5;
-}
 
 .classwork-meta {
   display: flex;
@@ -5362,13 +5338,7 @@ a:focus {
   border-top: 1px solid #f0f0f0;
 }
 
-.role-indicator {
-  background: #f8f9fa;
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin-bottom: 16px;
-  border-left: 4px solid #4285f4;
-}
+
 
 .teacher-indicator, .student-indicator {
   display: flex;
@@ -5897,4 +5867,834 @@ a:focus {
 
 .person-avatar img:not([src]) + .avatar-fallback {
   display: flex;
+}
+/* Delete All Quizzes Button Styles */
+.delete-all-quizzes-btn {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-left: 15px;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.3);
+}
+
+.delete-all-quizzes-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #b91c1c, #991b1b);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(220, 38, 38, 0.4);
+}
+
+.delete-all-quizzes-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.teacher-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Individual quiz delete button */
+.delete-quiz-btn {
+  background: #dc2626;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.delete-quiz-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.delete-quiz-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+/* ===== GOOGLE CLASSROOM STYLE GRADEBOOK ===== */
+
+.gradebook-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+}
+
+.gradebook-overall {
+  color: #444;
+}
+
+.sort-by-btn {
+  border: 1px solid #dadce0;
+  background: #fff;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.sort-by-btn:hover {
+  background: #f8f9fa;
+}
+
+/* Scrollable table like Classroom */
+.gradebook-table-container {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow-x: auto;
+  background: #fff;
+}
+
+.gradebook-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  min-width: 900px;
+  font-size: 0.8rem;
+}
+
+.gradebook-table th,
+.gradebook-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* sticky left column for student names */
+.gradebook-table th.sticky-col,
+.gradebook-table td.sticky-col {
+  position: sticky;
+  left: 0;
+  background: #fafafa;
+  z-index: 2;
+  text-align: left;
+}
+
+.gradebook-table thead th.sticky-col {
+  z-index: 3;
+}
+
+.student-col-header {
+  font-weight: 600;
+}
+
+/* exam headers (date, title, max points) */
+.gradebook-exam-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.exam-date {
+  font-size: 0.7rem;
+  color: #777;
+}
+
+.exam-title-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.8rem;
+  color: #1a73e8;
+  cursor: pointer;
+  text-align: left;
+}
+
+.exam-title-btn:hover {
+  text-decoration: underline;
+}
+
+.exam-maxpoints {
+  font-size: 0.7rem;
+  color: #777;
+}
+
+/* class average row */
+.gradebook-class-average-row td {
+  background: #f8fbff;
+  font-weight: 600;
+}
+
+.class-average-label {
+  font-size: 0.8rem;
+  color: #555;
+}
+
+/* grade cells */
+.grade-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 70px;
+}
+
+.grade-score {
+  font-weight: 500;
+}
+
+.grade-status {
+  font-size: 0.7rem;
+  color: #999;
+}
+
+/* colors for missing / completed like Classroom */
+.grade-cell-missing .grade-score,
+.grade-cell-missing .grade-status {
+  color: #d93025;
+}
+
+.grade-cell-completed .grade-score {
+  color: #188038;
+}
+
+/* student name button */
+.student-name-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.student-name-btn:hover {
+  text-decoration: underline;
+}
+.quiz-comments {
+  margin-top: 15px;
+  padding: 12px;
+  border-top: 1px solid #eee;
+}
+
+.comments-title {
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.comments-list {
+  margin-bottom: 10px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.comment-item {
+  background: #f7f7f7;
+  padding: 8px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+
+.comment-date {
+  display: block;
+  font-size: 10px;
+  color: #888;
+  margin-top: 3px;
+}
+
+.no-comments {
+  color: #999;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.comment-input-container {
+  display: flex;
+  gap: 8px;
+}
+
+.comment-input {
+  flex: 1;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+}
+
+.comment-post-btn {
+  background: #1a73e8;
+  color: white;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.comment-post-btn:hover {
+  background: #0f5cc0;
+}
+/* --- Gradebook layout --- */
+.gradebook-table-container {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.gradebook-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 700px;
+}
+
+.gradebook-table th,
+.gradebook-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  background-color: #fff;
+  font-size: 14px;
+}
+
+/* sticky first column like Google Classroom */
+.gradebook-table .sticky-col {
+  position: sticky;
+  left: 0;
+  background-color: #fff;
+  z-index: 2;
+}
+
+/* header for "Students" column */
+.student-col-header {
+  font-weight: 500;
+}
+
+/* toolbar */
+.gradebook-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.gradebook-sort {
+  position: relative;
+  display: inline-block;
+}
+
+.sort-by-btn {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid #dadce0;
+  background-color: #f8f9fa;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.sort-by-btn:hover {
+  background-color: #f1f3f4;
+}
+
+/* dropdown menu */
+.sort-menu {
+  position: absolute;
+  margin-top: 4px;
+  min-width: 180px;
+  background-color: #fff;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  z-index: 10;
+}
+
+.sort-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.sort-menu-item:hover {
+  background-color: #f1f3f4;
+}
+
+/* student cell (avatar + name) */
+.student-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.student-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.student-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.student-name {
+  font-size: 14px;
+  color: #202124;
+}
+
+/* class average row */
+.gradebook-class-average-row td {
+  background-color: #f8f9fa;
+  font-weight: 500;
+}
+/* ===== GOOGLE CLASSROOM STYLE QUIZ CARDS ===== */
+
+.quiz-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 30px;
+  max-width: 800px;
+}
+
+.quiz-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.quiz-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  border-color: #dadce0;
+}
+
+.quiz-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.quiz-icon {
+  font-size: 20px;
+  width: 40px;
+  height: 40px;
+  background: #f8f9fa;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.quiz-title-section {
+  flex: 1;
+  min-width: 0;
+}
+
+.quiz-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: #3c4043;
+  margin: 0 0 4px 0;
+  line-height: 1.4;
+}
+
+.quiz-status {
+  font-size: 13px;
+  font-weight: 400;
+  padding: 2px 8px;
+  border-radius: 12px;
+  display: inline-block;
+}
+
+.quiz-status.draft {
+  background: #fef7e0;
+  color: #b06000;
+  border: 1px solid #fef0b3;
+}
+
+.quiz-status.scheduled {
+  background: #e8f0fe;
+  color: #1a73e8;
+  border: 1px solid #d2e3fc;
+}
+
+.quiz-status.posted {
+  background: #e6f4ea;
+  color: #137333;
+  border: 1px solid #ceead6;
+}
+
+.quiz-actions-dropdown {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.quiz-menu-btn {
+  background: none;
+  border: none;
+  padding: 8px;
+  border-radius: 50%;
+  cursor: pointer;
+  color: #5f6368;
+  transition: background 0.2s;
+}
+
+.quiz-menu-btn:hover {
+  background: #f1f3f4;
+}
+
+.quiz-info {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f1f3f4;
+}
+
+.quiz-meta {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #5f6368;
+}
+
+.quiz-type {
+  background: #f8f9fa;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.quiz-date {
+  color: #5f6368;
+}
+
+.student-quiz-actions {
+  margin-top: 8px;
+}
+
+.start-quiz-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  background: white;
+  color: #3c4043;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.start-quiz-btn.available {
+  background: #1a73e8;
+  color: white;
+  border-color: #1a73e8;
+}
+
+.start-quiz-btn.available:hover {
+  background: #1669d6;
+  border-color: #1669d6;
+}
+
+.start-quiz-btn:disabled {
+  background: #f8f9fa;
+  color: #9aa0a6;
+  cursor: not-allowed;
+  border-color: #dadce0;
+}
+
+/* Classwork Header Improvements */
+.classwork-header-section {
+  margin-bottom: 24px;
+}
+
+.classwork-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.classwork-title h2 {
+  font-size: 24px;
+  font-weight: 400;
+  color: #3c4043;
+  margin: 0;
+}
+
+.classwork-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.create-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1a73e8;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.create-btn:hover {
+  background: #1669d6;
+}
+
+.btn-icon {
+  font-size: 14px;
+}
+
+/* Role Indicator */
+.role-indicator {
+  padding: 12px 0;
+  border-top: 1px solid #e8eaed;
+}
+
+.teacher-indicator, .student-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #5f6368;
+}
+
+.teacher-indicator {
+  color: #1a73e8;
+}
+
+.student-indicator {
+  color: #34a853;
+}
+
+.delete-all-quizzes-btn {
+  margin-left: auto;
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.delete-all-quizzes-btn:hover:not(:disabled) {
+  background: #c82333;
+}
+
+.delete-all-quizzes-btn:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .quiz-cards-grid {
+    gap: 8px;
+  }
+  
+  .quiz-card {
+    padding: 12px;
+  }
+  
+  .quiz-card-header {
+    gap: 8px;
+  }
+  
+  .quiz-icon {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+  }
+  
+  .classwork-header {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  
+  .classwork-actions {
+    width: 100%;
+  }
+  
+  .create-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .teacher-indicator {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .delete-all-quizzes-btn {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+/* Quiz Menu Styles */
+.quiz-actions-dropdown {
+  position: relative;
+}
+
+.quiz-menu-btn {
+  padding: 8px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #5f6368;
+  transition: background-color 0.2s;
+}
+
+.quiz-menu-btn:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.quiz-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: white;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  min-width: 150px;
+  padding: 8px 0;
+}
+
+.quiz-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #3c4043;
+  transition: background-color 0.2s;
+}
+
+.quiz-menu-item:hover {
+  background-color: #f8f9fa;
+}
+
+.quiz-menu-item.delete {
+  color: #d93025;
+}
+
+.quiz-menu-item.delete:hover {
+  background-color: #fce8e6;
+}
+
+.menu-item-icon {
+  margin-right: 12px;
+  width: 16px;
+  height: 16px;
+}
+
+/* Ensure quiz card has proper positioning for dropdown */
+.quiz-card {
+  position: relative;
+}
+
+.quiz-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.demo-badge {
+  background: #fbbc04;
+  color: #000;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+/* Add these styles to Dashboard.css */
+.exam-duration {
+  font-size: 0.8rem;
+  color: #666;
+  background: #f0f9ff;
+  padding: 2px 8px;
+  border-radius: 12px;
+  margin-left: 8px;
+}
+
+.no-action-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.info-text {
+  font-size: 0.9rem;
+  color: #6c757d;
+}
+
+.exam-status {
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 12px;
+  margin-left: auto;
+}
+
+.exam-status.draft {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.exam-status.published {
+  background: #d1ecf1;
+  color: #0c5460;
+}
+
+.exam-status.posted {
+  background: #d4edda;
+  color: #155724;
+}
+
+.live-badge {
+  background: #dc3545;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  margin-left: 8px;
 }

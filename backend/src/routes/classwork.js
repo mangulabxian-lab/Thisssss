@@ -1,4 +1,4 @@
-// routes/classwork.js - FULLY UPDATED VERSION WITH EXAM MERGE
+// routes/classwork.js - FULLY UPDATED VERSION WITH EXAM MERGE AND COMMENT ROUTES
 const express = require("express");
 const router = express.Router();
 const Class = require("../models/Class");
@@ -121,6 +121,140 @@ router.get("/:classId/topics", authMiddleware, checkClassAccess, async (req, res
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+
+// ✅ COMMENT ROUTES
+
+// ✅ GET comments for a specific quiz/exam
+router.get("/:classId/quiz/:quizId/comments", authMiddleware, checkClassAccess, async (req, res) => {
+  try {
+    const { quizId } = req.params;
+    
+    const exam = await Exam.findById(quizId)
+      .populate("comments.author", "name email profileImage role")
+      .select("comments");
+    
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Quiz not found"
+      });
+    }
+    
+    // Sort comments by creation date (newest first)
+    const sortedComments = exam.comments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
+    res.json({
+      success: true,
+      data: sortedComments
+    });
+  } catch (err) {
+    console.error("❌ Get comments error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch comments"
+    });
+  }
+});
+
+// ✅ ADD comment to quiz/exam
+router.post("/:classId/quiz/:quizId/comments", authMiddleware, checkClassAccess, async (req, res) => {
+  try {
+    const { quizId } = req.params;
+    const { content } = req.body;
+    
+    if (!content || !content.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Comment content is required"
+      });
+    }
+    
+    const exam = await Exam.findById(quizId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Quiz not found"
+      });
+    }
+    
+    const newComment = {
+      content: content.trim(),
+      author: req.user.id,
+      role: req.user.role || "student",
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    exam.comments.push(newComment);
+    await exam.save();
+    
+    // Populate author info for response
+    await exam.populate("comments.author", "name email profileImage role");
+    
+    const addedComment = exam.comments[exam.comments.length - 1];
+    
+    res.json({
+      success: true,
+      message: "Comment added successfully",
+      data: addedComment
+    });
+  } catch (err) {
+    console.error("❌ Add comment error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add comment"
+    });
+  }
+});
+
+// ✅ DELETE comment from quiz/exam
+router.delete("/:classId/quiz/:quizId/comments/:commentId", authMiddleware, async (req, res) => {
+  try {
+    const { quizId, commentId } = req.params;
+    
+    const exam = await Exam.findById(quizId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Quiz not found"
+      });
+    }
+    
+    const comment = exam.comments.id(commentId);
+    if (!comment) {
+      return res.status(404).json({
+        success: false,
+        message: "Comment not found"
+      });
+    }
+    
+    // Check if user is authorized to delete (author or teacher)
+    const isAuthor = comment.author.toString() === req.user.id;
+    const isTeacher = req.user.role === "teacher";
+    
+    if (!isAuthor && !isTeacher) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to delete this comment"
+      });
+    }
+    
+    exam.comments.pull(commentId);
+    await exam.save();
+    
+    res.json({
+      success: true,
+      message: "Comment deleted successfully"
+    });
+  } catch (err) {
+    console.error("❌ Delete comment error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete comment"
+    });
   }
 });
 

@@ -610,10 +610,10 @@ export default function ToDoPage() {
                     <div className="empty-todo">
                       <div className="empty-state-icon">
                         {activeTab === "missing"
-                          ? "📝"
+                          ? ""
                           : activeTab === "assigned"
-                          ? "📚"
-                          : "✅"}
+                          ? ""
+                          : ""}
                       </div>
                       <h3>
                         {activeTab === "missing"

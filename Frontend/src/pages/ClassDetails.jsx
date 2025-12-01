@@ -1,6 +1,6 @@
-// ClassDetails.jsx - WITHOUT ANNOUNCEMENTS
+// ClassDetails.jsx - COMPLETELY FIXED VERSION
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { FaPlus, FaEdit, FaEye, FaRocket, FaTrash } from "react-icons/fa";
 import { getClassDetails, getClassMembers, getClasswork, getQuizForStudent } from "../lib/api";
 import PeopleTab from "../components/PeopleTab";
@@ -9,12 +9,13 @@ import "./ClassDetails.css";
 export default function ClassDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [classInfo, setClassInfo] = useState(null);
   const [students, setStudents] = useState([]);
   const [classwork, setClasswork] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("classwork"); // Default to classwork
+  const [activeTab, setActiveTab] = useState("classwork");
   
   // Classwork Create Modal States
   const [showCreateClassworkModal, setShowCreateClassworkModal] = useState(false);
@@ -26,11 +27,61 @@ export default function ClassDetails() {
   const [creatingClasswork, setCreatingClasswork] = useState(false);
   const [deletingItem, setDeletingItem] = useState(null);
 
+  // ✅ FIXED: Function to fetch classwork
+  const fetchClasswork = async () => {
+    if (!id) {
+      console.error("❌ Class ID is undefined, cannot fetch classwork");
+      return;
+    }
+    
+    try {
+      console.log("📚 Fetching classwork for class:", id);
+      const classworkRes = await getClasswork(id);
+      const classworkData = classworkRes.data?.data || classworkRes.data || [];
+      console.log("✅ Classwork loaded:", classworkData.length, "items");
+      setClasswork(classworkData);
+    } catch (error) {
+      console.log("Classwork endpoint not available yet, using mock data");
+      // Fallback to empty array if endpoint fails
+      setClasswork([]);
+    }
+  };
+
+  // ✅ FIXED: Handle navigation state for active tab
+  useEffect(() => {
+    const handleNavigationState = () => {
+      if (location.state?.activeTab === 'classwork') {
+        console.log("🎯 Setting active tab from navigation state:", location.state);
+        setActiveTab('classwork');
+        
+        if (location.state.refresh) {
+          console.log("🔄 Refreshing classwork data");
+          fetchClasswork(); // This function is now defined
+        }
+        
+        if (location.state.showSuccess && location.state.message) {
+          alert(location.state.message);
+        }
+        
+        // Clear the state to prevent repeated alerts
+        window.history.replaceState({}, document.title);
+      }
+    };
+    
+    handleNavigationState();
+  }, [location.state]);
+
   useEffect(() => {
     const fetchClassDetails = async () => {
       try {
         setLoading(true);
         console.log("📋 Fetching class details for:", id);
+
+        // ✅ FIXED: Check if class ID exists before making API calls
+        if (!id) {
+          console.error("❌ Class ID is undefined!");
+          throw new Error("Class ID is missing");
+        }
 
         // Fetch without announcements
         const [classRes, studentRes, classworkRes] = await Promise.all([
@@ -66,7 +117,12 @@ export default function ClassDetails() {
       }
     };
 
-    fetchClassDetails();
+    if (id) {
+      fetchClassDetails();
+    } else {
+      console.error("❌ No class ID provided in URL");
+      setLoading(false);
+    }
   }, [id]);
 
   // Check if user is teacher

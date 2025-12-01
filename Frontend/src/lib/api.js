@@ -1,4 +1,4 @@
-// src/lib/api.js - UPDATED VERSION WITH PROFILE IMAGE SUPPORT
+// src/lib/api.js - UPDATED VERSION WITH ANNOUNCEMENT FUNCTIONS
 import axios from "axios";
 
 const api = axios.create({
@@ -32,6 +32,66 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// ===== ANNOUNCEMENT FUNCTIONS =====
+export const createAnnouncement = async (announcementData) => {
+  const response = await api.post('/announcements', announcementData);
+  return response.data;
+};
+
+export const getAnnouncements = async (classId) => {
+  const response = await api.get(`/announcements/class/${classId}`);
+  return response.data;
+};
+
+export const updateAnnouncement = async (announcementId, updateData) => {
+  const response = await api.put(`/announcements/${announcementId}`, updateData);
+  return response.data;
+};
+
+export const deleteAnnouncement = async (announcementId) => {
+  const response = await api.delete(`/announcements/${announcementId}`);
+  return response.data;
+};
+
+export const addCommentToAnnouncement = async (announcementId, commentData) => {
+  const response = await api.post(`/announcements/${announcementId}/comments`, commentData);
+  return response.data;
+};
+
+export const deleteCommentFromAnnouncement = async (announcementId, commentId) => {
+  const response = await api.delete(`/announcements/${announcementId}/comments/${commentId}`);
+  return response.data;
+};
+
+export const getAnnouncementComments = async (announcementId) => {
+  const response = await api.get(`/announcements/${announcementId}/comments`);
+  return response.data;
+};
+
+// ===== QUIZ COMMENT FUNCTIONS =====
+// ✅ OLD COMMENT FUNCTIONS (renamed to avoid conflicts)
+export const getQuizCommentsOld = (quizId) => api.get(`/comments/${quizId}`);
+export const postQuizCommentOld = (quizId, text) =>
+  api.post(`/comments/${quizId}`, { text });
+
+// ✅ NEW COMMENT FUNCTIONS
+export const getQuizComments = async (classId, quizId) => {
+  const response = await api.get(`/classwork/${classId}/quiz/${quizId}/comments`);
+  return response.data;
+};
+
+export const addQuizComment = async (classId, quizId, content) => {
+  const response = await api.post(`/classwork/${classId}/quiz/${quizId}/comments`, {
+    content
+  });
+  return response.data;
+};
+
+export const deleteQuizComment = async (classId, quizId, commentId) => {
+  const response = await api.delete(`/classwork/${classId}/quiz/${quizId}/comments/${commentId}`);
+  return response.data;
+};
 
 // ===== USER PROFILE WITH IMAGE SUPPORT =====
 export const getUserProfile = async () => {
@@ -109,18 +169,26 @@ export const getUserProfileById = async (userId) => {
 
 // ===== STUDENT MANAGEMENT API WITH PROFILE IMAGES =====
 export const getClassPeople = async (classId) => {
-  const response = await api.get(`/student-management/${classId}/students`);
-  console.log('👥 Class people response:', response.data);
-  
-  // Ensure all students have proper profileImage URLs
-  if (response.data.students) {
-    response.data.students = response.data.students.map(student => ({
-      ...student,
-      profileImage: student.profileImage || `/api/auth/users/${student.id}/profile-image`
-    }));
+  try {
+    const response = await api.get(`/student-management/${classId}/students`);
+    console.log('👥 Class people API response:', response.data);
+    
+    if (response.data.success && response.data.data) {
+      const { teachers, students } = response.data.data;
+      
+      console.log('📊 Profile Image Stats:', {
+        teachers: teachers?.length || 0,
+        students: students?.length || 0,
+        teachersWithImages: teachers?.filter(t => t.profileImage)?.length || 0,
+        studentsWithImages: students?.filter(s => s.profileImage)?.length || 0
+      });
+    }
+    
+    return response.data;
+  } catch (error) {
+    console.error('❌ Error fetching class people:', error);
+    throw error;
   }
-  
-  return response.data;
 };
 
 // Update student profile (for teachers)
@@ -302,13 +370,41 @@ export const submitQuizAnswers = async (examId, answers) => {
 
 // ===== QUIZ DELETE =====
 export const deleteQuiz = async (examId) => {
-  const response = await api.delete(`/exams/${examId}`);
-  return response.data;
+  try {
+    const response = await api.delete(`/exams/${examId}`);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Failed to delete quiz:', error);
+    
+    if (error.response?.status === 404) {
+      throw new Error('Quiz not found. It may have already been deleted.');
+    }
+    if (error.response?.status === 403) {
+      throw new Error('You are not authorized to delete this quiz.');
+    }
+    
+    throw new Error(error.response?.data?.message || 'Failed to delete quiz.');
+  }
 };
 
 export const deleteAllQuizzes = async (classId) => {
-  const response = await api.delete(`/exams/class/${classId}/delete-all`);
-  return response.data;
+  try {
+    console.log(`🗑️ Deleting all quizzes for class: ${classId}`);
+    const response = await api.delete(`/exams/class/${classId}/delete-all`);
+    console.log('✅ All quizzes deleted successfully');
+    return response.data;
+  } catch (error) {
+    console.error('❌ Failed to delete all quizzes:', error);
+    
+    if (error.response?.status === 404) {
+      throw new Error('Class not found or no quizzes to delete.');
+    }
+    if (error.response?.status === 403) {
+      throw new Error('You are not authorized to delete quizzes from this class.');
+    }
+    
+    throw new Error(error.response?.data?.message || 'Failed to delete all quizzes.');
+  }
 };
 
 // ===== CLASSWORK =====
@@ -507,40 +603,6 @@ export const analyzeProctoringFrame = async (imageData) => {
     body: JSON.stringify({ image: imageData })
   });
   return await response.json();
-};
-
-// ===== CLASS CHAT API =====
-export const getClassChatMessages = async (classId) => {
-  try {
-    const response = await api.get(`/class-chat/${classId}/messages`);
-    console.log('📨 Chat messages response:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error("❌ Error fetching class chat messages:", error);
-    // Return empty array if endpoint doesn't exist yet
-    return { success: true, data: [] };
-  }
-};
-
-export const sendClassChatMessage = async (classId, messageData) => {
-  try {
-    const response = await api.post(`/class-chat/${classId}/messages`, messageData);
-    console.log('✅ Chat message sent:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error("❌ Error sending chat message:", error);
-    throw error;
-  }
-};
-
-export const deleteChatMessage = async (messageId) => {
-  try {
-    const response = await api.delete(`/class-chat/messages/${messageId}`);
-    return response.data;
-  } catch (error) {
-    console.error("❌ Error deleting chat message:", error);
-    throw error;
-  }
 };
 
 // DEFAULT EXPORT

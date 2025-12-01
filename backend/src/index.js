@@ -1,4 +1,4 @@
-// server.js - COMPLETELY FIXED VERSION WITH CHAT FORUM (THEME REMOVED)
+// server.js - COMPLETELY FIXED VERSION (CHAT REMOVED) WITH COMMENT SUPPORT
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -8,7 +8,6 @@ const dotenv = require("dotenv");
 const cookieParser = require("cookie-parser");
 const path = require("path");
 const jwt = require("jsonwebtoken");
-const ChatMessage = require("./models/ChatMessage"); // ✅ ADD CHAT MESSAGE MODEL
 
 // ✅ LOAD ENV FIRST
 dotenv.config();
@@ -41,9 +40,6 @@ const io = new Server(server, {
   pingInterval: 10000
 });
 
-
-
-
 // ===== MIDDLEWARES =====
 app.use(cors({ 
   origin: [
@@ -67,7 +63,8 @@ app.use("/api/classwork", require("./routes/classwork"));
 app.use("/api/announcements", require("./routes/announcements"));
 app.use("/api/student-management", require("./routes/studentManagement"));
 app.use("/api/notifications", require("./routes/notifications"));
-app.use("/api/chat", require("./routes/chatRoutes")); // ✅ ADD CHAT ROUTES
+
+// CHAT ROUTES COMPLETELY REMOVED
 // THEME ROUTES COMPLETELY REMOVED
 
 // ✅ ADD DEBUG ROUTE TO TEST ALL REGISTERED ROUTES
@@ -97,7 +94,6 @@ app.get("/api/debug-routes", (req, res) => {
   });
 });
 
-
 // Sa server.js, idagdag ito bago ang health check:
 app.post('/api/proctoring-alert', async (req, res) => {
   try {
@@ -126,18 +122,29 @@ app.post('/api/proctoring-alert', async (req, res) => {
   }
 });
 
-
 // ===== HEALTH CHECK =====
 app.get("/api/health", (req, res) => {
   res.json({ 
     status: "OK", 
     message: "Server is running",
     socketIO: "ENABLED",
-    chat: "ENABLED",
+    realTimeComments: "ENABLED",
+    // CHAT STATUS REMOVED
     // THEME STATUS REMOVED
     timestamp: new Date().toISOString()
   });
 });
+
+// ===== COMMENT BROADCASTING FUNCTIONS =====
+const broadcastNewComment = (quizId, comment) => {
+  console.log(`📝 Broadcasting new comment to quiz-comments-${quizId}:`, comment._id);
+  io.to(`quiz-comments-${quizId}`).emit('new-comment', comment);
+};
+
+const broadcastDeletedComment = (quizId, commentId) => {
+  console.log(`🗑️ Broadcasting deleted comment to quiz-comments-${quizId}:`, commentId);
+  io.to(`quiz-comments-${quizId}`).emit('comment-deleted', commentId);
+};
 
 // ===== SOCKET.IO AUTHENTICATION =====
 io.use((socket, next) => {
@@ -171,142 +178,20 @@ io.on("connection", (socket) => {
 
   let currentRoom = null;
 
-  // ===== CLASS CHAT HANDLERS =====
-  socket.on("join-class-chat", async ({ classId }) => {
-    try {
-      socket.join(`class-chat-${classId}`);
-      console.log(`💬 User ${socket.userName} joined class chat: ${classId}`);
-      
-      // Send chat history to the user
-      const messages = await ChatMessage.find({ 
-        classId, 
-        isDeleted: false 
-      })
-      .populate("userId", "name email")
-      .sort({ createdAt: 1 })
-      .limit(50)
-      .lean();
-
-      const formattedMessages = messages.map(msg => ({
-        _id: msg._id,
-        classId: msg.classId,
-        userId: {
-          _id: msg.userId._id,
-          name: msg.userId.name,
-          email: msg.userId.email
-        },
-        userName: msg.userName || msg.userId.name,
-        userRole: msg.userRole,
-        message: msg.message,
-        replies: msg.replies || [],
-        createdAt: msg.createdAt,
-        updatedAt: msg.updatedAt
-      }));
-
-      socket.emit("chat-history", formattedMessages);
-      
-    } catch (error) {
-      console.error('❌ Error joining class chat:', error);
-    }
+  // ===== REAL-TIME COMMENT HANDLERS =====
+  socket.on('join-quiz-comments', ({ quizId }) => {
+    const roomName = `quiz-comments-${quizId}`;
+    socket.join(roomName);
+    console.log(`📝 User ${socket.userName} joined quiz comments room: ${roomName}`);
   });
 
-  // ✅ ADDED: Main class chat message handler
-  socket.on("send-chat-message", async (data) => {
-    try {
-      const { classId, message } = data;
-      
-      if (!message || !message.trim()) {
-        return;
-      }
-
-      // Save to database
-      const chatMessage = new ChatMessage({
-        classId,
-        userId: socket.userId,
-        userName: socket.userName,
-        userRole: socket.userRole,
-        message: message.trim()
-      });
-
-      await chatMessage.save();
-      
-      // Populate user data for response
-      await chatMessage.populate("userId", "name email");
-
-      // Broadcast to all users in the class chat room
-      const messageData = {
-        _id: chatMessage._id,
-        classId: chatMessage.classId,
-        userId: {
-          _id: chatMessage.userId._id,
-          name: chatMessage.userId.name,
-          email: chatMessage.userId.email
-        },
-        userName: chatMessage.userName,
-        userRole: chatMessage.userRole,
-        message: chatMessage.message,
-        replies: chatMessage.replies || [],
-        createdAt: chatMessage.createdAt,
-        updatedAt: chatMessage.updatedAt
-      };
-
-      io.to(`class-chat-${classId}`).emit("new-chat-message", messageData);
-      
-      console.log(`💬 New chat message in class ${classId} from ${socket.userName}`);
-
-    } catch (error) {
-      console.error('❌ Error sending chat message:', error);
-      socket.emit("chat-error", { message: "Failed to send message" });
-    }
+  socket.on('leave-quiz-comments', ({ quizId }) => {
+    const roomName = `quiz-comments-${quizId}`;
+    socket.leave(roomName);
+    console.log(`📝 User ${socket.userName} left quiz comments room: ${roomName}`);
   });
 
-  // ✅ ADD THIS NEW HANDLER FOR EXAM CHAT (after the class chat handlers)
-  socket.on("send-exam-chat-message", async (data) => {
-    try {
-      console.log('💬 Received exam chat message:', data);
-      
-      const { roomId, message } = data;
-      
-      // ✅ SAFELY EXTRACT MESSAGE TEXT
-      let messageText;
-      if (typeof message === 'object' && message.text) {
-        messageText = message.text;
-      } else if (typeof message === 'string') {
-        messageText = message;
-      } else {
-        console.error('❌ Invalid message format in exam chat:', message);
-        return;
-      }
-      
-      if (!messageText || !messageText.trim()) {
-        return;
-      }
-
-      const messageData = {
-        id: message.id || Date.now().toString(),
-        text: messageText.trim(),
-        sender: message.sender || socket.userRole,
-        senderName: message.senderName || socket.userName,
-        timestamp: message.timestamp || new Date(),
-        type: message.type || socket.userRole
-      };
-
-      // ✅ BROADCAST TO EXAM ROOM
-      io.to(roomId).emit("chat-message", {
-        message: messageData,
-        userName: socket.userName,
-        userRole: socket.userRole
-      });
-
-      console.log(`💬 Exam chat broadcast to ${roomId}:`, messageData);
-
-    } catch (error) {
-      console.error('❌ Error in exam chat:', error);
-    }
-  });
-
-
-
+  // ALL CHAT HANDLERS COMPLETELY REMOVED
 
 // Sa server.js, tiyakin na tama ang proctoring alert handler:
 socket.on('proctoring-alert', (data) => {
@@ -346,95 +231,6 @@ socket.on('student-violation', (data) => {
     io.to(`exam-${data.examId}`).emit('student-violation', data);
   }
 });
-  socket.on("delete-chat-message", async (data) => {
-    try {
-      const { messageId, classId } = data;
-      
-      // Find and soft delete the message
-      const message = await ChatMessage.findById(messageId);
-      if (message) {
-        // Check if user has permission to delete (owner or teacher)
-        if (message.userId.toString() === socket.userId || socket.userRole === 'teacher') {
-          message.isDeleted = true;
-          message.deletedAt = new Date();
-          await message.save();
-
-          // Broadcast deletion to all users in the class chat room
-          io.to(`class-chat-${classId}`).emit("message-deleted", { messageId });
-          
-          console.log(`🗑️ Message ${messageId} deleted by ${socket.userName}`);
-        } else {
-          socket.emit("chat-error", { message: "Not authorized to delete this message" });
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error deleting chat message:', error);
-      socket.emit("chat-error", { message: "Failed to delete message" });
-    }
-  });
-
-  socket.on("add-chat-reply", async (data) => {
-    try {
-      const { messageId, classId, replyMessage } = data;
-      
-      if (!replyMessage || !replyMessage.trim()) {
-        socket.emit("chat-error", { message: "Reply cannot be empty" });
-        return;
-      }
-
-      const parentMessage = await ChatMessage.findById(messageId);
-      
-      if (!parentMessage) {
-        socket.emit("chat-error", { message: "Message not found" });
-        return;
-      }
-
-      const replyData = {
-        userId: socket.userId,
-        userName: socket.userName,
-        userRole: socket.userRole,
-        message: replyMessage.trim(),
-        createdAt: new Date()
-      };
-
-      parentMessage.replies.push(replyData);
-      await parentMessage.save();
-
-      // Broadcast new reply to all users in the class chat room
-      io.to(`class-chat-${classId}`).emit("reply-added", {
-        messageId,
-        reply: replyData
-      });
-
-      console.log(`💬 Reply added to message ${messageId} by ${socket.userName}`);
-    } catch (error) {
-      console.error('❌ Error adding chat reply:', error);
-      socket.emit("chat-error", { message: "Failed to add reply" });
-    }
-  });
-
-  // Handle typing indicators
-  socket.on("typing-start", (data) => {
-    socket.to(`class-chat-${data.classId}`).emit("user-typing", {
-      userName: socket.userName,
-      isTyping: true
-    });
-  });
-
-  socket.on("typing-stop", (data) => {
-    socket.to(`class-chat-${data.classId}`).emit("user-typing", {
-      userName: socket.userName,
-      isTyping: false
-    });
-  });
-
-  // Leave class chat
-  socket.on("leave-class-chat", ({ classId }) => {
-    socket.leave(`class-chat-${classId}`);
-    console.log(`💬 User ${socket.userName} left class chat: ${classId}`);
-  });
-
-  
 
   // ===== EXAM START/END HANDLERS =====
   socket.on('exam-started', (data) => {
@@ -511,7 +307,6 @@ socket.on('student-violation', (data) => {
   socket.to(data.roomId).emit('exam-time-update', data);
 });
 
-
 // Add this utility function to server.js
 const formatTime = (seconds) => {
   if (seconds === null || seconds === undefined) return '00:00';
@@ -526,6 +321,7 @@ const formatTime = (seconds) => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 };
+
   // ===== DETECTION SETTINGS HANDLER =====
   socket.on('update-detection-settings', (data) => {
     console.log('🎯 Teacher updating detection settings for student:', data.studentSocketId);
@@ -704,6 +500,14 @@ const formatTime = (seconds) => {
   socket.on("disconnect", (reason) => {
     console.log(`🔌 Socket disconnected: ${socket.id} - Reason: ${reason}`);
     
+    // Leave all comment rooms
+    const rooms = Array.from(socket.rooms);
+    rooms.forEach(room => {
+      if (room.startsWith('quiz-comments-')) {
+        console.log(`📝 User automatically left comment room: ${room}`);
+      }
+    });
+    
     if (currentRoom && examRooms.has(currentRoom)) {
       const room = examRooms.get(currentRoom);
       
@@ -745,6 +549,14 @@ const formatTime = (seconds) => {
   });
 });
 
+// ===== EXPORT COMMENT FUNCTIONS FOR USE IN ROUTES =====
+module.exports = {
+  app,
+  io,
+  broadcastNewComment,
+  broadcastDeletedComment
+};
+
 // ===== START SERVER =====
 const startServer = async () => {
   try {
@@ -756,7 +568,8 @@ const startServer = async () => {
     server.listen(PORT, () => {
       console.log(`✅ Server running at http://localhost:${PORT}`);
       console.log(`✅ Socket.IO: ENABLED with room management`);
-      console.log(`✅ CHAT SYSTEM: ENABLED with real-time messaging`);
+      console.log(`✅ REAL-TIME COMMENTS: ENABLED for quizzes`);
+      console.log(`✅ CHAT SYSTEM: DISABLED (removed)`);
       console.log(`✅ CORS: Enabled for ${process.env.FRONTEND_URL || "http://localhost:5173"}`);
       console.log(`✅ TIMER SYNC: Enabled for exam sessions`);
       console.log(`✅ DETECTION SETTINGS: Enabled for individual student control`);

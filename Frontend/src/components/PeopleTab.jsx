@@ -1,6 +1,7 @@
 // Frontend/src/components/PeopleTab.jsx
 import { useState, useEffect } from 'react';
 import { FaEllipsisV, FaEnvelope, FaUserMinus, FaVolumeMute, FaVolumeUp } from 'react-icons/fa';
+import api from '../lib/api';
 import './PeopleTab.css';
 
 // ✅ UPDATED AVATAR COMPONENT
@@ -62,33 +63,44 @@ const PeopleTab = ({ classId }) => {
     fetchPeopleData();
   }, [classId]);
 
+  // ✅ UPDATED: Better debugging for profile images
   const fetchPeopleData = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/student-management/${classId}/students`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await api.get(`/student-management/${classId}/students`);
 
-      const result = await response.json();
+      console.log('👥 People data API response:', response.data);
 
-      if (result.success) {
-        console.log('👥 People data loaded:', {
-          teachers: result.data.teachers?.length || 0,
-          students: result.data.students?.length || 0,
-          teachersWithProfiles: result.data.teachers?.filter(t => t.profileImage).length || 0,
-          studentsWithProfiles: result.data.students?.filter(s => s.profileImage).length || 0
+      if (response.data.success) {
+        const peopleData = response.data.data;
+        
+        console.log('📊 People Tab - Profile Image Analysis:', {
+          teachers: peopleData.teachers?.length || 0,
+          students: peopleData.students?.length || 0,
+          teachersWithProfiles: peopleData.teachers?.filter(t => t.profileImage)?.length || 0,
+          studentsWithProfiles: peopleData.students?.filter(s => s.profileImage)?.length || 0,
+          teacherDetails: peopleData.teachers?.map(t => ({
+            name: t.name,
+            email: t.email,
+            profileImage: t.profileImage,
+            hasImage: !!t.profileImage
+          })),
+          studentDetails: peopleData.students?.map(s => ({
+            name: s.name,
+            email: s.email,
+            profileImage: s.profileImage,
+            hasImage: !!s.profileImage
+          }))
         });
-        setPeopleData(result.data);
+        
+        setPeopleData(peopleData);
       } else {
-        setError(result.message);
+        setError(response.data.message);
       }
     } catch (err) {
       setError('Failed to load people data');
       console.error('Error fetching people data:', err);
+      console.error('Error details:', err.response?.data);
     } finally {
       setLoading(false);
     }
@@ -104,22 +116,13 @@ const PeopleTab = ({ classId }) => {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/student-management/${classId}/students/${studentId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await api.delete(`/student-management/${classId}/students/${studentId}`);
 
-      const result = await response.json();
-
-      if (result.success) {
+      if (response.data.success) {
         alert('Student removed successfully');
         fetchPeopleData();
       } else {
-        alert('Failed to remove student: ' + result.message);
+        alert('Failed to remove student: ' + response.data.message);
       }
     } catch (err) {
       alert('Failed to remove student');
@@ -129,63 +132,17 @@ const PeopleTab = ({ classId }) => {
 
   const handleToggleMute = async (studentId, studentName, isCurrentlyMuted) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/student-management/${classId}/students/${studentId}/mute`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await api.patch(`/student-management/${classId}/students/${studentId}/mute`);
 
-      const result = await response.json();
-
-      if (result.success) {
+      if (response.data.success) {
         alert(`Student ${isCurrentlyMuted ? 'unmuted' : 'muted'} successfully`);
         fetchPeopleData();
       } else {
-        alert('Failed to update student: ' + result.message);
+        alert('Failed to update student: ' + response.data.message);
       }
     } catch (err) {
       alert('Failed to update student');
       console.error('Error toggling mute:', err);
-    }
-  };
-
-  const handleEmailStudents = async () => {
-    if (!emailData.subject.trim() || !emailData.message.trim()) {
-      alert('Please enter both subject and message');
-      return;
-    }
-
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/student-management/${classId}/email-students`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          studentIds: selectedStudents,
-          subject: emailData.subject,
-          message: emailData.message
-        })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        alert(`Email prepared for ${result.data.recipients} students`);
-        setShowEmailModal(false);
-        setSelectedStudents([]);
-        setEmailData({ subject: '', message: '' });
-      } else {
-        alert('Failed to send emails: ' + result.message);
-      }
-    } catch (err) {
-      alert('Failed to send emails');
-      console.error('Error sending emails:', err);
     }
   };
 
@@ -205,6 +162,33 @@ const PeopleTab = ({ classId }) => {
     }
   };
 
+  const handleEmailStudents = async () => {
+    if (!emailData.subject.trim() || !emailData.message.trim()) {
+      alert('Please enter both subject and message');
+      return;
+    }
+
+    try {
+      const response = await api.post(`/student-management/${classId}/email-students`, {
+        studentIds: selectedStudents,
+        subject: emailData.subject,
+        message: emailData.message
+      });
+
+      if (response.data.success) {
+        alert(`Email prepared for ${response.data.data.recipients} students`);
+        setShowEmailModal(false);
+        setSelectedStudents([]);
+        setEmailData({ subject: '', message: '' });
+      } else {
+        alert('Failed to send emails: ' + response.data.message);
+      }
+    } catch (err) {
+      alert('Failed to send emails');
+      console.error('Error sending emails:', err);
+    }
+  };
+
   if (loading) return <div className="loading">Loading people...</div>;
   if (error) return <div className="error-message">{error}</div>;
   if (!peopleData) return <div className="error-message">No data available</div>;
@@ -215,25 +199,31 @@ const PeopleTab = ({ classId }) => {
       <section className="people-section">
         <h3 className="section-title">Teachers</h3>
         <div className="people-list">
-          {peopleData.teachers.map(teacher => (
-            <div key={teacher._id} className="person-card teacher-card">
-              {/* ✅ UPDATED: Using PersonAvatar component */}
-              <PersonAvatar user={teacher} size={44} />
-              <div className="person-info">
-                <div className="person-name">{teacher.name}</div>
-                <div className="person-email">{teacher.email}</div>
-                <div className="person-role teacher-role">Teacher</div>
+          {peopleData.teachers && peopleData.teachers.length > 0 ? (
+            peopleData.teachers.map(teacher => (
+              <div key={teacher._id} className="person-card teacher-card">
+                {/* ✅ UPDATED: Using PersonAvatar component */}
+                <PersonAvatar user={teacher} size={44} />
+                <div className="person-info">
+                  <div className="person-name">{teacher.name}</div>
+                  <div className="person-email">{teacher.email}</div>
+                  <div className="person-role teacher-role">Teacher</div>
+                </div>
               </div>
+            ))
+          ) : (
+            <div className="no-teachers">
+              <p>No teachers found</p>
             </div>
-          ))}
+          )}
         </div>
       </section>
 
       {/* Students Section */}
       <section className="people-section">
         <div className="section-header">
-          <h3 className="section-title">Students ({peopleData.students.length})</h3>
-          {peopleData.students.length > 0 && (
+          <h3 className="section-title">Students ({peopleData.students?.length || 0})</h3>
+          {peopleData.students && peopleData.students.length > 0 && (
             <div className="bulk-actions">
               <button
                 className="bulk-action-btn"
@@ -245,7 +235,7 @@ const PeopleTab = ({ classId }) => {
           )}
         </div>
 
-        {peopleData.students.length > 0 ? (
+        {peopleData.students && peopleData.students.length > 0 ? (
           <div className="students-container">
             <div className="bulk-selection-header">
               <label className="checkbox-label">

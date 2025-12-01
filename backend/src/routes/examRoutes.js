@@ -48,6 +48,203 @@ const upload = multer({
   }
 });
 
+// ===== QUIZ COMMENT ROUTES =====
+
+// ✅ GET comments for a specific quiz/exam
+router.get("/:examId/comments", async (req, res) => {
+  try {
+    const { examId } = req.params;
+    
+    console.log("🎯 GET QUIZ COMMENTS ROUTE HIT:", examId);
+
+    const exam = await Exam.findById(examId)
+      .populate("comments.author", "name email profileImage role")
+      .select("comments");
+    
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Quiz not found"
+      });
+    }
+    
+    // Check if user has access to this exam
+    const classData = await Class.findById(exam.classId);
+    const hasAccess = classData && (
+      classData.ownerId.toString() === req.user.id ||
+      classData.members.some(m => m.userId && m.userId.toString() === req.user.id)
+    );
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to access this quiz"
+      });
+    }
+    
+    // Sort comments by creation date (newest first)
+    const sortedComments = exam.comments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
+    res.json({
+      success: true,
+      data: sortedComments
+    });
+  } catch (err) {
+    console.error("❌ Get quiz comments error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch comments"
+    });
+  }
+});
+
+// ✅ ADD comment to quiz/exam
+router.post("/:examId/comments", async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const { content } = req.body;
+    
+    if (!content || !content.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Comment content is required"
+      });
+    }
+    
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Quiz not found"
+      });
+    }
+    
+    // Check if user has access to this exam
+    const classData = await Class.findById(exam.classId);
+    const hasAccess = classData && (
+      classData.ownerId.toString() === req.user.id ||
+      classData.members.some(m => m.userId && m.userId.toString() === req.user.id)
+    );
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to comment on this quiz"
+      });
+    }
+    
+    const newComment = {
+      content: content.trim(),
+      author: req.user.id,
+      role: req.user.role || "student",
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    exam.comments.push(newComment);
+    await exam.save();
+    
+    // Populate author info for response
+    await exam.populate("comments.author", "name email profileImage role");
+    
+    const addedComment = exam.comments[exam.comments.length - 1];
+    
+    res.json({
+      success: true,
+      message: "Comment added successfully",
+      data: addedComment
+    });
+  } catch (err) {
+    console.error("❌ Add comment error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add comment"
+    });
+  }
+});
+
+// ✅ DELETE comment from quiz/exam
+router.delete("/:examId/comments/:commentId", async (req, res) => {
+  try {
+    const { examId, commentId } = req.params;
+    
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Quiz not found"
+      });
+    }
+    
+    const comment = exam.comments.id(commentId);
+    if (!comment) {
+      return res.status(404).json({
+        success: false,
+        message: "Comment not found"
+      });
+    }
+    
+    // Check if user is authorized to delete (author or teacher)
+    const isAuthor = comment.author.toString() === req.user.id;
+    const isTeacher = req.user.role === "teacher";
+    
+    if (!isAuthor && !isTeacher) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to delete this comment"
+      });
+    }
+    
+    exam.comments.pull(commentId);
+    await exam.save();
+    
+    res.json({
+      success: true,
+      message: "Comment deleted successfully"
+    });
+  } catch (err) {
+    console.error("❌ Delete comment error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete comment"
+    });
+  }
+});
+
+// ✅ TEST COMMENTS ENDPOINT
+router.get("/test-comments/:examId", async (req, res) => {
+  try {
+    const { examId } = req.params;
+    
+    console.log("🧪 TESTING COMMENTS ENDPOINT FOR EXAM:", examId);
+    
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Exam not found"
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Comments endpoint is working!",
+      examId: examId,
+      hasCommentsField: exam.comments !== undefined,
+      commentsCount: exam.comments ? exam.comments.length : 0,
+      user: req.user
+    });
+    
+  } catch (err) {
+    console.error("❌ Test comments error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Test failed",
+      error: err.message
+    });
+  }
+});
+
 // ===== TEST ROUTE =====
 router.get("/test-session-routes", async (req, res) => {
   console.log("✅ TEST ROUTE HIT - Session routes are working");
@@ -425,6 +622,168 @@ router.get("/:examId/joined-students", async (req, res) => {
   }
 });
 
+// ===== LIVE CLASS ROUTES =====
+
+// ✅ START LIVE CLASS
+router.post("/:examId/start-live-class", async (req, res) => {
+  try {
+    const { examId } = req.params;
+    
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Exam not found"
+      });
+    }
+    
+    // Check if user is teacher
+    const classData = await Class.findById(exam.classId);
+    if (!classData || classData.ownerId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "Only teachers can start live classes"
+      });
+    }
+    
+    // Check if exam is a live class
+    if (exam.examType !== 'live-class' && !exam.isLiveClass) {
+      return res.status(400).json({
+        success: false,
+        message: "This is not a live class exam"
+      });
+    }
+    
+    // Update exam to active live class
+    const updatedExam = await Exam.findByIdAndUpdate(
+      examId,
+      { 
+        isActive: true,
+        isDeployed: true,
+        startedAt: new Date(),
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+    
+    res.json({
+      success: true,
+      message: "Live class started",
+      data: updatedExam
+    });
+    
+  } catch (err) {
+    console.error("Start live class error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to start live class"
+    });
+  }
+});
+
+// ✅ JOIN LIVE CLASS
+router.post("/:examId/join-live-class", async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const userId = req.user.id;
+    
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Exam not found"
+      });
+    }
+    
+    // Check if exam is active live class
+    if (!exam.isActive || (exam.examType !== 'live-class' && !exam.isLiveClass)) {
+      return res.status(400).json({
+        success: false,
+        message: "Live class is not active"
+      });
+    }
+    
+    // Check if user is in class
+    const classData = await Class.findById(exam.classId);
+    const isMember = classData.members.some(m => 
+      m.userId && m.userId.toString() === userId
+    ) || classData.ownerId.toString() === userId;
+    
+    if (!isMember) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not a member of this class"
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Joined live class",
+      data: {
+        examId: exam._id,
+        title: exam.title,
+        userId: userId,
+        isHost: classData.ownerId.toString() === userId
+      }
+    });
+    
+  } catch (err) {
+    console.error("Join live class error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to join live class"
+    });
+  }
+});
+
+// ✅ END LIVE CLASS
+router.post("/:examId/end-live-class", async (req, res) => {
+  try {
+    const { examId } = req.params;
+    
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Exam not found"
+      });
+    }
+    
+    // Check if user is teacher
+    const classData = await Class.findById(exam.classId);
+    if (!classData || classData.ownerId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "Only teachers can end live classes"
+      });
+    }
+    
+    // Update exam to inactive
+    const updatedExam = await Exam.findByIdAndUpdate(
+      examId,
+      { 
+        isActive: false,
+        endedAt: new Date(),
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+    
+    res.json({
+      success: true,
+      message: "Live class ended",
+      data: updatedExam
+    });
+    
+  } catch (err) {
+    console.error("End live class error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to end live class"
+    });
+  }
+});
+
 // ===== COMPLETION TRACKING ROUTES =====
 
 // ✅ MARK EXAM AS COMPLETED
@@ -673,6 +1032,8 @@ router.get("/take/:examId", async (req, res) => {
       isDeployed: exam.isDeployed,
       isActive: exam.isActive,
       timeLimit: exam.timeLimit,
+      examType: exam.examType, // ✅ ADDED EXAM TYPE
+      isLiveClass: exam.isLiveClass, // ✅ ADDED LIVE CLASS FLAG
       createdAt: exam.createdAt,
       updatedAt: exam.updatedAt
     };
@@ -823,17 +1184,29 @@ router.post("/:examId/submit", async (req, res) => {
 
 // ===== EXISTING QUIZ CREATION ROUTES =====
 
-// ✅ CREATE QUIZ
+// ✅ CREATE QUIZ - UPDATED WITH EXAM TYPE
 router.post("/create/:classId", async (req, res) => {
   try {
     const { classId } = req.params;
-    const { title, description, questions, settings, theme, isPublished, totalPoints } = req.body;
+    const { 
+      title, 
+      description, 
+      questions, 
+      settings, 
+      theme, 
+      isPublished, 
+      totalPoints,
+      examType = 'asynchronous', // ✅ ADDED DEFAULT
+      timeLimit = 60, // ✅ ADDED DEFAULT
+      isLiveClass = false // ✅ ADDED DEFAULT
+    } = req.body;
 
     console.log("🎯 CREATE QUIZ ROUTE HIT:", { 
       classId, 
       title, 
-      questions: questions?.length,
-      totalPoints: totalPoints || 0
+      examType, // ✅ LOG EXAM TYPE
+      timeLimit,
+      isLiveClass
     });
 
     // Validate required fields
@@ -860,7 +1233,7 @@ router.post("/create/:classId", async (req, res) => {
       });
     }
 
-    // Create new exam/quiz
+    // Create new exam/quiz with exam type
     const newExam = new Exam({
       title,
       description: description || "Form description",
@@ -869,6 +1242,9 @@ router.post("/create/:classId", async (req, res) => {
       questions: questions || [],
       totalPoints: totalPoints || 0,
       isQuiz: true,
+      examType: examType, // ✅ SAVE EXAM TYPE
+      timeLimit: examType === 'live-class' ? 0 : timeLimit, // ✅ SET TIME LIMIT
+      isLiveClass: examType === 'live-class', // ✅ SET LIVE CLASS FLAG
       isPublished: isPublished || false,
       settings: settings || {
         collectEmails: false,
@@ -895,7 +1271,7 @@ router.post("/create/:classId", async (req, res) => {
       { $addToSet: { exams: savedExam._id } }
     );
 
-    console.log("✅ Quiz created successfully:", savedExam._id);
+    console.log("✅ Quiz created successfully:", savedExam._id, "Type:", examType);
 
     res.status(201).json({
       success: true,
@@ -913,13 +1289,24 @@ router.post("/create/:classId", async (req, res) => {
   }
 });
 
-// ✅ UPDATE QUIZ QUESTIONS
+// ✅ UPDATE QUIZ QUESTIONS - UPDATED WITH EXAM TYPE
 router.put("/:examId/quiz-questions", async (req, res) => {
   try {
     const { examId } = req.params;
-    const { title, description, questions, settings, theme, isPublished, totalPoints } = req.body;
+    const { 
+      title, 
+      description, 
+      questions, 
+      settings, 
+      theme, 
+      isPublished, 
+      totalPoints,
+      examType, // ✅ ADDED
+      timeLimit, // ✅ ADDED
+      isLiveClass // ✅ ADDED
+    } = req.body;
 
-    console.log("🎯 UPDATE QUIZ QUESTIONS ROUTE HIT:", examId);
+    console.log("🎯 UPDATE QUIZ QUESTIONS ROUTE HIT:", examId, "Exam Type:", examType);
 
     // Validate examId
     if (!mongoose.Types.ObjectId.isValid(examId)) {
@@ -946,7 +1333,7 @@ router.put("/:examId/quiz-questions", async (req, res) => {
       });
     }
 
-    // Update quiz
+    // Update quiz with exam type fields
     const updateData = {
       updatedAt: new Date()
     };
@@ -957,6 +1344,19 @@ router.put("/:examId/quiz-questions", async (req, res) => {
     if (settings !== undefined) updateData.settings = settings;
     if (theme !== undefined) updateData.theme = theme;
     if (totalPoints !== undefined) updateData.totalPoints = totalPoints;
+    if (examType !== undefined) {
+      updateData.examType = examType;
+      updateData.isLiveClass = examType === 'live-class';
+      if (examType === 'live-class') {
+        updateData.timeLimit = 0;
+      } else if (timeLimit !== undefined) {
+        updateData.timeLimit = timeLimit;
+      }
+    }
+    if (timeLimit !== undefined && (!examType || examType !== 'live-class')) {
+      updateData.timeLimit = timeLimit;
+    }
+    if (isLiveClass !== undefined) updateData.isLiveClass = isLiveClass;
     if (isPublished !== undefined) {
       updateData.isPublished = isPublished;
       if (isPublished && !exam.publishedAt) {
@@ -970,7 +1370,7 @@ router.put("/:examId/quiz-questions", async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    console.log("✅ Quiz updated successfully:", examId);
+    console.log("✅ Quiz updated successfully:", examId, "Type:", updatedExam.examType);
 
     res.json({
       success: true,
@@ -1078,7 +1478,7 @@ router.get("/:examId/edit", async (req, res) => {
       });
     }
 
-    console.log("✅ Quiz loaded for editing:", examId);
+    console.log("✅ Quiz loaded for editing:", examId, "Type:", exam.examType);
 
     res.json({
       success: true,
@@ -1297,46 +1697,198 @@ router.get("/deployed/:classId", async (req, res) => {
   }
 });
 
-// ✅ DELETE EXAM
+// ✅ IMPROVED DELETE EXAM ENDPOINT
 router.delete("/:examId", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
   try {
-    const exam = await Exam.findById(req.params.examId);
-    if (!exam) return res.status(404).json({ 
-      success: false, 
-      message: "Exam not found" 
-    });
+    const examId = req.params.examId;
+    const userId = req.user.id;
     
-    // ✅ Check if user is class teacher for this exam
-    const classData = await Class.findById(exam.classId);
-    if (!classData || classData.ownerId.toString() !== req.user.id) {
-      return res.status(403).json({ 
-      success: false, 
-      message: "Not authorized to delete this exam" 
+    console.log("🗑️ DELETE EXAM REQUEST:", { 
+      examId, 
+      userId, 
+      timestamp: new Date().toISOString() 
+    });
+
+    // Validate examId format
+    if (!mongoose.Types.ObjectId.isValid(examId)) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid exam ID format" 
       });
     }
 
-    // Delete associated file
+    // Find exam with session for transaction consistency
+    const exam = await Exam.findById(examId).session(session);
+    if (!exam) {
+      await session.abortTransaction();
+      console.log("❌ Exam not found for deletion:", examId);
+      return res.status(404).json({ 
+        success: false, 
+        message: "Exam not found" 
+      });
+    }
+    
+    // ✅ Enhanced authorization check
+    const classData = await Class.findById(exam.classId).session(session);
+    if (!classData) {
+      await session.abortTransaction();
+      return res.status(404).json({ 
+        success: false, 
+        message: "Class not found" 
+      });
+    }
+
+    // Check if user is class owner or has admin privileges
+    const isClassOwner = classData.ownerId.toString() === userId;
+    const isAdmin = req.user.role === 'admin'; // If you have admin role
+    
+    if (!isClassOwner && !isAdmin) {
+      await session.abortTransaction();
+      console.log("❌ Unauthorized deletion attempt:", { userId, classOwner: classData.ownerId });
+      return res.status(403).json({ 
+        success: false, 
+        message: "Not authorized to delete this exam. Only class teachers can delete exams." 
+      });
+    }
+
+    // ✅ Prevent deletion of active exam sessions
+    if (exam.isActive) {
+      await session.abortTransaction();
+      return res.status(409).json({
+        success: false,
+        message: "Cannot delete an active exam session. Please end the session first."
+      });
+    }
+
+    // ✅ Async file deletion with error handling
     if (exam.fileUrl) {
-      const filename = exam.fileUrl.split('/').pop();
-      const filePath = path.join(uploadDir, filename);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      try {
+        const filename = exam.fileUrl.split('/').pop();
+        const filePath = path.join(uploadDir, filename);
+        
+        if (fs.existsSync(filePath)) {
+          await fs.promises.unlink(filePath);
+          console.log("✅ Deleted associated file:", filename);
+        }
+      } catch (fileError) {
+        console.warn("⚠️ Could not delete file, continuing with exam deletion:", fileError.message);
+        // Don't fail the entire operation if file deletion fails
       }
     }
 
-    await Class.findByIdAndUpdate(exam.classId, { $pull: { exams: exam._id } });
-    await Exam.findByIdAndDelete(req.params.examId);
+    // ✅ Remove from class's exams array
+    await Class.findByIdAndUpdate(
+      exam.classId, 
+      { $pull: { exams: exam._id } },
+      { session }
+    );
+
+    // ✅ Delete the exam
+    await Exam.findByIdAndDelete(examId, { session });
+
+    // ✅ Commit the transaction
+    await session.commitTransaction();
+    
+    console.log("✅ Exam deleted successfully:", examId);
 
     res.json({ 
       success: true, 
-      message: "Exam deleted successfully" 
+      message: "Exam deleted successfully",
+      deletedExamId: examId,
+      deletedAt: new Date().toISOString()
     });
+
   } catch (err) {
+    // ✅ Abort transaction on error
+    await session.abortTransaction();
+    
     console.error("❌ Delete exam error:", err);
-    res.status(500).json({ 
+    
+    // Handle specific error types
+    let errorMessage = "Failed to delete exam";
+    let statusCode = 500;
+    
+    if (err.name === 'CastError') {
+      errorMessage = "Invalid exam ID";
+      statusCode = 400;
+    } else if (err.name === 'ValidationError') {
+      errorMessage = "Validation error during deletion";
+      statusCode = 400;
+    }
+    
+    res.status(statusCode).json({ 
       success: false, 
-      message: "Failed to delete exam",
+      message: errorMessage,
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  } finally {
+    // ✅ Always end the session
+    session.endSession();
+  }
+});
+
+// ✅ DELETE ALL QUIZZES FOR A CLASS
+router.delete("/class/:classId/delete-all", async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const teacherId = req.user.id;
+
+    console.log("🎯 DELETE ALL QUIZZES ROUTE HIT:", { classId, teacherId });
+
+    // Validate classId
+    if (!mongoose.Types.ObjectId.isValid(classId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid class ID format"
+      });
+    }
+
+    // Verify the teacher owns this class
+    const classObj = await Class.findById(classId);
+    if (!classObj) {
+      return res.status(404).json({
+        success: false,
+        message: "Class not found"
+      });
+    }
+
+    if (classObj.ownerId.toString() !== teacherId) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to delete quizzes from this class"
+      });
+    }
+
+    // Delete all quizzes/exams for this class
+    const result = await Exam.deleteMany({ 
+      classId: classId,
+      createdBy: teacherId
+    });
+
+    console.log("✅ Quizzes deletion result:", result);
+
+    // Also remove exams from class's exams array
+    await Class.findByIdAndUpdate(
+      classId,
+      { $set: { exams: [] } }
+    );
+
+    res.json({
+      success: true,
+      message: `Successfully deleted ${result.deletedCount} quizzes from this class`,
+      deletedCount: result.deletedCount
+    });
+
+  } catch (error) {
+    console.error("❌ Error deleting all quizzes:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while deleting quizzes",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -1379,12 +1931,12 @@ router.get("/:examId/questions", async (req, res) => {
   }
 });
 
-// ✅ HEALTH CHECK - UPDATED WITH ALL ROUTES
+// ✅ HEALTH CHECK - UPDATED WITH ALL ROUTES INCLUDING COMMENTS AND LIVE CLASS
 router.get("/health", (req, res) => {
   console.log("✅ EXAM HEALTH CHECK ROUTE HIT");
   res.json({
     success: true,
-    message: "Exam routes are working with STUDENT QUIZ features",
+    message: "Exam routes are working with STUDENT QUIZ & COMMENT & LIVE CLASS features",
     user: req.user,
     routes: [
       "POST /create/:classId",
@@ -1402,15 +1954,24 @@ router.get("/health", (req, res) => {
       "DELETE /class/:classId/delete-all",
       "GET /:examId/questions",
       "PATCH /deploy/:examId",
-      "POST /:examId/start",
-      "POST /:examId/end",
+      "POST /:examId/start-session",
+      "POST /:examId/end-session",
       "POST /:examId/join",
       "GET /:examId/session-status",
       "GET /:examId/joined-students",
       // New completion tracking routes
       "POST /:examId/complete",
       "GET /student/completed", 
-      "GET /:examId/completion-status"
+      "GET /:examId/completion-status",
+      // ✅ COMMENT ROUTES
+      "GET /:examId/comments",
+      "POST /:examId/comments", 
+      "DELETE /:examId/comments/:commentId",
+      "GET /test-comments/:examId",
+      // ✅ LIVE CLASS ROUTES
+      "POST /:examId/start-live-class",
+      "POST /:examId/join-live-class",
+      "POST /:examId/end-live-class"
     ],
     timestamp: new Date().toISOString()
   });

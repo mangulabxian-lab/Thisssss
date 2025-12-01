@@ -371,7 +371,7 @@
 
 .student-name {
   font-weight: 500;
-  color: #e8eaed;
+  color: #3C4043;
   font-size: 0.85rem;
 }
 
@@ -1560,7 +1560,7 @@
 
 .dropdown-arrow {
   font-size: 9px;
-  color: #ccc;
+  color:black;
   transition: transform 0.3s;
 }
 

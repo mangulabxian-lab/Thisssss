@@ -4825,7 +4825,7 @@ a:focus {
   padding: 20px;
   transition: box-shadow 0.2s;
   width: 1000px;
-  height: 100px;
+  height: 250px;
 }
 
 .classwork-card:hover {

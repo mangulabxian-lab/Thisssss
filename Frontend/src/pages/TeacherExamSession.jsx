@@ -22,6 +22,10 @@ export default function TeacherExamSession() {
   const [studentStreams, setStudentStreams] = useState({});
   const [peerConnections, setPeerConnections] = useState({});
   
+
+  const [studentAttempts, setStudentAttempts] = useState({});
+
+
   // Chat State
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -49,7 +53,6 @@ export default function TeacherExamSession() {
   const messagesEndRef = useRef(null);
 
   // ==================== PROCTORING ALERTS FUNCTIONS ====================
- // PALITAN ang handleProctoringAlert function:
 const handleProctoringAlert = useCallback((data) => {
   console.log('🚨 Teacher received proctoring alert:', data);
   
@@ -58,49 +61,65 @@ const handleProctoringAlert = useCallback((data) => {
     return;
   }
 
-  // ✅ FIX: Use functional update to avoid students dependency
-  setStudents(prevStudents => {
-    const student = prevStudents.find(s => s.socketId === data.studentSocketId);
-    console.log('🔍 Found student for alert:', student);
+  // ✅ UPDATE ATTEMPTS FROM SERVER DATA
+  if (data.attemptsInfo) {
+    setStudentAttempts(prev => ({
+      ...prev,
+      [data.studentSocketId]: data.attemptsInfo
+    }));
     
-    if (!student) {
-      console.log('❌ No student found with socket ID:', data.studentSocketId);
-      console.log('📋 Available students:', prevStudents.map(s => ({ name: s.name, socketId: s.socketId })));
-      return prevStudents; // Return unchanged if student not found
-    }
-    
-    return prevStudents;
-  });
-
-  const alertMessage = data.message || 'Suspicious activity detected';
-  const messageString = typeof alertMessage === 'string' ? alertMessage : String(alertMessage);
-
-  const newAlert = {
-    id: Date.now() + Math.random(),
-    message: messageString,
-    type: data.type || 'warning',
-    severity: data.severity || 'medium',
-    timestamp: new Date().toLocaleTimeString(),
-    details: data.details || {},
-    studentSocketId: data.studentSocketId
-  };
-
-  console.log('📝 Storing alert for student:', data.studentSocketId, newAlert);
-
-  // ✅ FIX: Use functional update for proctoringAlerts
+    // Update students list with attempts info
+    setStudents(prev => prev.map(student => 
+      student.socketId === data.studentSocketId 
+        ? { 
+            ...student, 
+            violations: data.attemptsInfo.currentAttempts,
+            attemptsLeft: data.attemptsInfo.attemptsLeft
+          }
+        : student
+    ));
+  }
+  
+  // ✅ FIXED: Use unique ID to prevent duplicates
+  const alertId = `${data.studentSocketId}_${Date.now()}_${data.detectionType || 'alert'}`;
+  
+  // Add to alerts display with duplicate prevention
   setProctoringAlerts(prev => {
     const studentAlerts = prev[data.studentSocketId] || [];
+    
+    // Check if this exact alert already exists (within 5 seconds)
+    const isDuplicate = studentAlerts.some(alert => 
+      alert.message === data.message && 
+      Date.now() - new Date(alert.timestamp).getTime() < 5000
+    );
+    
+    if (isDuplicate) {
+      console.log('🛑 Skipping duplicate alert:', data.message);
+      return prev;
+    }
+    
+    const newAlert = {
+      id: alertId,
+      message: data.message,
+      type: data.type || 'warning',
+      severity: data.severity || 'medium',
+      timestamp: new Date().toLocaleTimeString(),
+      detectionType: data.detectionType,
+      confidence: data.confidence
+    };
+    
     return {
       ...prev,
       [data.studentSocketId]: [
         newAlert,
-        ...studentAlerts.slice(0, 19)
-      ]
+        ...studentAlerts
+      ].slice(0, 20)
     };
   });
+}, [examId, students]);
 
-  console.log('🔔 Alert processed successfully for teacher view:', messageString);
-}, []); // ✅ EMPTY DEPENDENCIES - NO MORE INFINITE LOOP
+
+
 
   // ==================== ALERTS MANAGEMENT FUNCTIONS ====================
   const toggleAlertsDropdown = (studentSocketId) => {
@@ -135,11 +154,11 @@ const handleProctoringAlert = useCallback((data) => {
   };
 
   // ==================== PROCTORING CONTROLS FUNCTIONS ====================
-  const openProctoringControls = (student) => {
-    console.log('🎯 Opening proctoring controls for:', student);
-    setSelectedStudent(student);
-    setShowProctoringControls(true);
-  };
+ const openProctoringControls = (student) => {
+  console.log('🎯 Opening proctoring controls for:', student);
+  setSelectedStudent(student);
+  setShowProctoringControls(true);
+};
 
   const closeProctoringControls = () => {
     setShowProctoringControls(false);
@@ -678,7 +697,26 @@ const handleSendMessage = (e) => {
         userRole: 'teacher'
       });
     });
-
+// Add this in your socket event listeners section
+newSocket.on('student-attempts-update', (data) => {
+  console.log('📊 Student attempts updated:', data);
+  
+  setStudentAttempts(prev => ({
+    ...prev,
+    [data.studentSocketId]: data.attempts
+  }));
+  
+  // Update students list with attempts info
+  setStudents(prev => prev.map(student => 
+    student.socketId === data.studentSocketId 
+      ? { 
+          ...student, 
+          violations: data.attempts.currentAttempts,
+          attemptsLeft: data.attempts.attemptsLeft
+        }
+      : student
+  ));
+});
     newSocket.on('connect_error', (error) => {
       console.error('❌ Teacher Socket connection failed:', error.message);
       setSocketStatus('error');
@@ -708,8 +746,23 @@ const handleSendMessage = (e) => {
       setSessionStarted(true);
     });
 
+    // Add this in your socket event listeners section
+// DAGDAGIN ito sa teacher socket event listeners:
+newSocket.on('proctoring-violation', (data) => {
+  console.log('📊 Proctoring violation received:', data);
+  
+  // This will trigger the handleProctoringAlert function
+  handleProctoringAlert({
+    studentSocketId: data.studentSocketId,
+    message: data.message,
+    type: 'warning',
+    severity: data.severity,
+    timestamp: data.timestamp,
+    detectionType: data.violationType,
+    confidence: data.confidence
+  });
+});
     newSocket.on('proctoring-alert', handleProctoringAlert);
-
     newSocket.on('student-joined', handleStudentJoined);
     newSocket.on('student-left', handleStudentLeft);
     newSocket.on('room-participants', handleRoomParticipants);
@@ -1331,22 +1384,64 @@ useEffect(() => {
     );
   };
 
+  const renderGlobalProctoringControls = () => {
+  if (!showProctoringControls) return null;
+
+  return (
+    <div className="global-proctoring-popup">
+      <div className="global-proctoring-content">
+        <div className="global-proctoring-header">
+          <h3>🎯 Global Proctoring Controls</h3>
+          <button 
+            className="close-global-proctoring-btn" 
+            onClick={() => setShowProctoringControls(false)}
+          >
+            ✕
+          </button>
+        </div>
+        
+        <div className="global-proctoring-body">
+          <TeacherProctoringControls 
+            examId={examId}
+            socket={socketRef.current}
+            students={students}
+            onDetectionSettingsChange={(settings) => {
+              console.log('Global detection settings updated:', settings);
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ✅ IMPROVED PROCTORING ALERTS RENDER FUNCTION - INTEGRATED IN FOOTER
 // ✅ IMPROVED PROCTORING ALERTS RENDER FUNCTION - INTEGRATED IN FOOTER
 const renderProctoringAlerts = (student) => {
   const studentAlerts = proctoringAlerts[student.socketId] || [];
+  
+  // ✅ FIX: Use the correct state variable name
+  const attemptsData = studentAttempts[student.socketId]; // Changed from studentAttemptsData
+  
   const isExpanded = expandedAlerts[student.socketId];
   
-  if (studentAlerts.length === 0) {
-    return (
-      <div className="no-alerts-message">
-        <span className="alert-icon">✅</span>
-        No alerts
-      </div>
-    );
-  }
-
   return (
     <div className="proctoring-alerts-footer">
+      {/* ATTEMPTS DISPLAY */}
+      {attemptsData && ( // ✅ Changed from studentAttempts to attemptsData
+        <div className={`attempts-display-mini ${
+          attemptsData.attemptsLeft <= 3 ? 'warning' : ''
+        } ${
+          attemptsData.attemptsLeft === 0 ? 'danger' : ''
+        }`}>
+          <span className="attempts-icon">⚠️</span>
+          <span className="attempts-text">
+            {attemptsData.attemptsLeft}/{attemptsData.maxAttempts} {/* ✅ Fixed */}
+          </span>
+        </div>
+      )}
+      
+      {/* ALERTS DISPLAY */}
       <div 
         className={`alerts-header ${isExpanded ? 'expanded' : ''}`}
         onClick={() => toggleAlertsDropdown(student.socketId)}
@@ -1375,54 +1470,48 @@ const renderProctoringAlerts = (student) => {
         </div>
       </div>
       
+      {/* ALERTS DROPDOWN */}
       {isExpanded && (
         <div className="alerts-dropdown">
+          {/* ATTEMPTS SUMMARY */}
+          {attemptsData && ( // ✅ Changed from studentAttempts to attemptsData
+            <div className="attempts-summary-card">
+              <div className="attempts-header">
+                <h5>📊 Violation Summary</h5>
+                <span className="attempts-total">
+                  {attemptsData.currentAttempts}/{attemptsData.maxAttempts} {/* ✅ Fixed */}
+                </span>
+              </div>
+              <div className="attempts-progress">
+                <div 
+                  className="attempts-progress-bar"
+                  style={{ 
+                    width: `${(attemptsData.currentAttempts / attemptsData.maxAttempts) * 100}%`  // ✅ Fixed
+                  }}
+                ></div>
+              </div>
+              <div className="attempts-left">
+                {attemptsData.attemptsLeft} attempts remaining {/* ✅ Fixed */}
+              </div>
+            </div>
+          )}
+          
+          {/* ALERTS LIST */}
           <div className="alerts-list">
             {studentAlerts.slice(0, 5).map((alert, index) => (
-              <div key={alert.id || index} className={`alert-item ${alert.type} ${alert.severity === 'critical' ? 'critical' : ''}`}>
-                <div className="alert-icon-small">
-                  {alert.type === 'warning' ? '⚠️' : 
-                   alert.type === 'danger' ? '🚨' : 
-                   alert.type === 'critical' ? '🔴' : 'ℹ️'}
-                </div>
+              <div key={alert.id || index} className={`alert-item ${alert.type}`}>
                 <div className="alert-content">
                   <div className="alert-message">
-                    {alert.severity && (
-                      <span className={`alert-severity ${alert.severity}`}></span>
-                    )}
+                    <span className={`alert-severity ${alert.severity}`}></span>
                     {alert.message}
                   </div>
                   <div className="alert-time">{alert.timestamp}</div>
+                  {alert.detectionType && (
+                    <div className="alert-type">{alert.detectionType}</div>
+                  )}
                 </div>
               </div>
             ))}
-            {studentAlerts.length > 5 && (
-              <div className="alert-item info">
-                <div className="alert-content">
-                  <div className="alert-message">
-                    ...and {studentAlerts.length - 5} more alerts
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="alerts-footer">
-            <span className="total-alerts">{studentAlerts.length} total</span>
-            <button 
-              className="test-alert-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleProctoringAlert({
-                  studentSocketId: student.socketId,
-                  message: 'Test alert - system working',
-                  type: 'info',
-                  severity: 'low',
-                  timestamp: new Date().toLocaleTimeString()
-                });
-              }}
-            >
-              Test
-            </button>
           </div>
         </div>
       )}
@@ -1462,16 +1551,7 @@ const renderProctoringAlerts = (student) => {
                 <div className="video-header">
                   <span className="student-badge">#{index + 1}</span>
                   <span className="student-name">{getSafeStudentName(student)}</span>
-                  <button 
-                    className="student-settings-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openProctoringControls(student);
-                    }}
-                    title="Detection Settings"
-                  >
-                    ⚙️
-                  </button>
+                  
                 </div>
                 
                 <div className="video-container">
@@ -1485,25 +1565,25 @@ const renderProctoringAlerts = (student) => {
                 </div>
                 
                 {/* ✅ VIDEO FOOTER WITH PROCTORING ALERTS */}
-                <div className="video-footer">
-                  <div className="student-info-compact">
-                    <span className="student-id">ID: {getSafeStudentId(student)}</span>
-                    <span className="connection-type">🟢 Online</span>
-                  </div>
-                  
-                  {/* ✅ PROCTORING ALERTS SECTION */}
-                  <div className="proctoring-alerts-section">
-                    {renderProctoringAlerts(student)}
-                  </div>
-                  
-                  <button 
-                    onClick={() => requestStudentCamera(socketId)}
-                    className="retry-camera-btn"
-                    title="Request camera again"
-                  >
-                    🔄
-                  </button>
-                </div>
+<div className="video-footer">
+<div className="student-info-compact">
+  <span className="connection-type">🟢 Online</span>
+  {studentAttempts[student.socketId] && (
+  <span className={`attempts-display ${
+    studentAttempts[student.socketId].attemptsLeft <= 3 ? 'warning' : ''
+  } ${
+    studentAttempts[student.socketId].attemptsLeft === 0 ? 'danger' : ''
+  }`}>
+    Attempts: {studentAttempts[student.socketId].attemptsLeft}/{studentAttempts[student.socketId].maxAttempts}
+  </span>
+)}
+</div>
+  
+  {/* ✅ PROCTORING ALERTS SECTION */}
+  <div className="proctoring-alerts-section">
+    {renderProctoringAlerts(student)}
+  </div>
+</div>
               </div>
             );
           })}
@@ -1620,6 +1700,14 @@ const renderProctoringAlerts = (student) => {
         </div>
         
         <div className="header-right">
+
+             <button 
+      className="global-proctoring-btn"
+      onClick={() => setShowProctoringControls(!showProctoringControls)}
+      title="Global Proctoring Controls"
+    >
+      🎯 Proctoring
+    </button>
           {/* Chat Toggle Button */}
           <button 
             className={`chat-toggle-btn ${unreadCount > 0 ? 'has-unread' : ''}`}
@@ -1667,6 +1755,9 @@ const renderProctoringAlerts = (student) => {
 
       {/* Timer Edit Modal */}
       {renderTimerEditModal()}
+
+      {/* Global Proctoring Controls Popup */}
+      {renderGlobalProctoringControls()}
 
       {/* PROCTORING CONTROLS POPUP */}
       {renderProctoringControlsPopup()}

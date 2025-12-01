@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "create-admin": "node src/scripts/createSuperAdmin.js",
+    "seed-admin": "node src/scripts/seedAdminData.js"
   },
   "dependencies": {
     "axios": "^1.13.2",
@@ -25,13 +27,15 @@
     "passport-google-oauth20": "^2.0.0",
     "path": "^0.12.7",
     "pdf-parse": "^1.1.4",
+    "qrcode": "^1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-google-recaptcha": "^3.1.0",
     "react-icons": "^5.5.0",
     "react-router-dom": "^7.9.5",
     "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "speakeasy": "^2.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

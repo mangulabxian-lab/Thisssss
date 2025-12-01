@@ -1,4 +1,4 @@
-// TeacherProctoringControls.jsx - UPDATED WITH ATTEMPTS LEFT SYSTEM
+// TeacherProctoringControls.jsx - COMPLETE UPDATED VERSION
 import React, { useState, useEffect } from 'react';
 import './TeacherProctoringControls.css';
 
@@ -10,18 +10,29 @@ export default function TeacherProctoringControls({
 }) {
   const [detectionSettings, setDetectionSettings] = useState({});
   const [expandedStudent, setExpandedStudent] = useState(null);
-  const [globalSettings, setGlobalSettings] = useState({
-    faceDetection: true,
-    gazeDetection: true,
-    phoneDetection: true,
-    mouthDetection: true,
-    multiplePeopleDetection: true,
-    audioDetection: true,
-    maxAttempts: 10, // ✅ ADDED: Default max attempts
-    autoDisconnect: true // ✅ ADDED: Auto disconnect when attempts exhausted
-  });
 
-  // Student attempts tracking
+  // Add these to your globalSettings state
+const [globalSettings, setGlobalSettings] = useState({
+  // Basic detections
+  faceDetection: true,
+  gazeDetection: true,
+  mouthDetection: true,
+  multiplePeopleDetection: true,
+  audioDetection: true,
+  
+  // Enhanced detections
+  handGestureDetection: true,
+  handFaceInteraction: true,
+  tabSwitchDetection: true,
+  mouseDetection: true,
+  headPoseDetection: true,
+
+  
+  // Attempts settings
+  maxAttempts: 10,
+  autoDisconnect: true
+});
+
   const [studentAttempts, setStudentAttempts] = useState({});
 
   // Initialize detection settings for each student
@@ -32,14 +43,23 @@ export default function TeacherProctoringControls({
     students.forEach(student => {
       if (!detectionSettings[student.socketId]) {
         initialSettings[student.socketId] = {
+          // Basic detections
           faceDetection: true,
           gazeDetection: true,
-          phoneDetection: true,
           mouthDetection: true,
           multiplePeopleDetection: true,
           audioDetection: true,
-          maxAttempts: 10, // ✅ ADDED: Per-student max attempts
-          autoDisconnect: true, // ✅ ADDED: Per-student auto disconnect
+          
+          // Enhanced detections
+          handGestureDetection: true,
+          handFaceInteraction: true,
+          tabSwitchDetection: true,
+          mouseDetection: true,
+          headPoseDetection: true,
+          
+          // Attempts settings
+          maxAttempts: 10,
+          autoDisconnect: true,
           customMessage: ''
         };
       }
@@ -73,7 +93,6 @@ export default function TeacherProctoringControls({
       
       const { studentSocketId, violationType, severity } = data;
       
-      // Update attempts for the student
       setStudentAttempts(prev => {
         const current = prev[studentSocketId] || {
           currentAttempts: 0,
@@ -100,24 +119,22 @@ export default function TeacherProctoringControls({
                 attemptsUsed: newAttempts,
                 attemptsLeft: attemptsLeft
               }
-            ].slice(-10) // Keep last 10 entries
+            ].slice(-10)
           }
         };
         
         // Check if attempts exhausted and auto-disconnect is enabled
         const studentSettings = detectionSettings[studentSocketId] || globalSettings;
-       // ✅ CHECK IF ATTEMPTS EXHAUSTED AND AUTO-DISCONNECT IS ENABLED
-if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
-  console.log(`🔌 Auto-disconnecting student ${studentSocketId} - attempts exhausted`);
-  socket.emit('disconnect-student', {
-    studentSocketId: studentSocketId,
-    reason: 'Attempts exhausted',
-    examId: examId
-  });
-  
-  // Show confirmation to teacher
-  alert(`🔌 Student ${student.name} has been automatically disconnected - Attempts exhausted`);
-}
+        if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
+          console.log(`🔌 Auto-disconnecting student ${studentSocketId} - attempts exhausted`);
+          socket.emit('disconnect-student', {
+            studentSocketId: studentSocketId,
+            reason: 'Attempts exhausted',
+            examId: examId
+          });
+          
+          alert(`🔌 Student ${students.find(s => s.socketId === studentSocketId)?.name} has been automatically disconnected - Attempts exhausted`);
+        }
         
         return updated;
       });
@@ -128,7 +145,7 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
     return () => {
       socket.off('student-violation', handleStudentViolation);
     };
-  }, [socket, globalSettings, detectionSettings, examId]);
+  }, [socket, globalSettings, detectionSettings, examId, students]);
 
   // Notify parent component when settings change
   useEffect(() => {
@@ -143,21 +160,52 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
     setExpandedStudent(expandedStudent === studentSocketId ? null : studentSocketId);
   };
 
+  // Global toggle function
   const toggleGlobalDetection = (detectionType) => {
-    setGlobalSettings(prev => ({
-      ...prev,
-      [detectionType]: !prev[detectionType]
-    }));
+    setGlobalSettings(prev => {
+      const newGlobalSettings = {
+        ...prev,
+        [detectionType]: !prev[detectionType]
+      };
+      
+      // Apply to all students using the NEW value
+      const newSettings = { ...detectionSettings };
+      Object.keys(newSettings).forEach(socketId => {
+        newSettings[socketId] = {
+          ...newSettings[socketId],
+          [detectionType]: newGlobalSettings[detectionType]
+        };
+      });
+      setDetectionSettings(newSettings);
+      
+      return newGlobalSettings;
+    });
+  };
 
-    // Apply to all students
+  // Apply global settings to all students immediately
+  const applyGlobalSettingsToAllStudents = () => {
     const newSettings = { ...detectionSettings };
     Object.keys(newSettings).forEach(socketId => {
-      newSettings[socketId] = {
-        ...newSettings[socketId],
-        [detectionType]: !globalSettings[detectionType]
+      newSettings[socketId] = { 
+        ...globalSettings, 
+        customMessage: newSettings[socketId]?.customMessage || '' 
       };
     });
     setDetectionSettings(newSettings);
+    
+    // Send settings to all students
+    students.forEach(student => {
+      if (socket && student.socketId) {
+        socket.emit('update-detection-settings', {
+          studentSocketId: student.socketId,
+          settings: globalSettings,
+          customMessage: '',
+          examId: examId
+        });
+      }
+    });
+    
+    alert('✅ Global settings applied to all students!');
   };
 
   const toggleStudentDetection = (studentSocketId, detectionType) => {
@@ -170,9 +218,9 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
     }));
   };
 
-  // ✅ ADDED: Update global max attempts
+  // Update global max attempts
   const updateGlobalMaxAttempts = (newMaxAttempts) => {
-    const maxAttempts = Math.max(1, Math.min(50, newMaxAttempts)); // Limit between 1-50
+    const maxAttempts = Math.max(1, Math.min(50, newMaxAttempts));
     
     setGlobalSettings(prev => ({
       ...prev,
@@ -189,7 +237,6 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
         maxAttempts: maxAttempts
       };
       
-      // Update attempts tracking
       if (newAttempts[socketId]) {
         newAttempts[socketId] = {
           ...newAttempts[socketId],
@@ -203,7 +250,7 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
     setStudentAttempts(newAttempts);
   };
 
-  // ✅ ADDED: Update student-specific max attempts
+  // Update student max attempts
   const updateStudentMaxAttempts = (studentSocketId, newMaxAttempts) => {
     const maxAttempts = Math.max(1, Math.min(50, newMaxAttempts));
     
@@ -215,7 +262,6 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
       }
     }));
     
-    // Update attempts tracking for this student
     setStudentAttempts(prev => {
       const current = prev[studentSocketId];
       if (!current) return prev;
@@ -231,20 +277,20 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
     });
   };
 
-  // ✅ ADDED: Reset student attempts
+  // Reset student attempts
   const resetStudentAttempts = (studentSocketId) => {
     setStudentAttempts(prev => ({
       ...prev,
       [studentSocketId]: {
         currentAttempts: 0,
-        maxAttempts: detectionSettings[studentSocketId]?.maxAttempts || globalSettings.maxAttempts,
-        attemptsLeft: detectionSettings[studentSocketId]?.maxAttempts || globalSettings.maxAttempts,
+        maxAttempts: detectionSettings[student.socketId]?.maxAttempts || globalSettings.maxAttempts,
+        attemptsLeft: detectionSettings[student.socketId]?.maxAttempts || globalSettings.maxAttempts,
         history: []
       }
     }));
   };
 
-  // ✅ ADDED: Manually add violation
+  // Manually add violation
   const addManualViolation = (studentSocketId, violationType = 'Manual Violation') => {
     if (!socket) return;
     
@@ -254,7 +300,6 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
       examId: examId
     });
     
-    // Also trigger local update
     setStudentAttempts(prev => {
       const current = prev[studentSocketId] || {
         currentAttempts: 0,
@@ -287,30 +332,6 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
     });
   };
 
-  const sendCustomDetectionSetting = (studentSocketId) => {
-    if (!socket || !studentSocketId) return;
-
-    const settings = detectionSettings[studentSocketId];
-    const customMessage = settings?.customMessage || '';
-
-    console.log('📤 Sending detection settings to student:', {
-      studentSocketId,
-      settings,
-      customMessage
-    });
-
-    if (settings) {
-      socket.emit('update-detection-settings', {
-        studentSocketId: studentSocketId,
-        settings: settings,
-        customMessage: customMessage,
-        examId: examId
-      });
-
-      alert(`✅ Detection settings sent to student!`);
-    }
-  };
-
   const applySettingsToStudent = (studentSocketId) => {
     if (!socket || !studentSocketId) {
       alert('❌ Cannot send settings - Socket not connected');
@@ -339,25 +360,30 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
     alert(`✅ Settings applied to student!`);
   };
 
+  // Apply global to all function
   const applyGlobalToAll = () => {
-    const newSettings = { ...detectionSettings };
-    Object.keys(newSettings).forEach(socketId => {
-      newSettings[socketId] = { ...globalSettings, customMessage: newSettings[socketId]?.customMessage || '' };
-    });
-    setDetectionSettings(newSettings);
-    alert('✅ Global settings applied to all students');
+    applyGlobalSettingsToAllStudents();
   };
 
   const resetAllToDefault = () => {
     const defaultSettings = {};
     students.forEach(student => {
       defaultSettings[student.socketId] = {
+        // Basic detections
         faceDetection: true,
         gazeDetection: true,
-        phoneDetection: true,
         mouthDetection: true,
         multiplePeopleDetection: true,
         audioDetection: true,
+        
+        // Enhanced detections
+        handGestureDetection: true,
+        handFaceInteraction: true,
+        tabSwitchDetection: true,
+        mouseDetection: true,
+        headPoseDetection: true,
+        
+        // Attempts settings
         maxAttempts: 10,
         autoDisconnect: true,
         customMessage: ''
@@ -365,12 +391,21 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
     });
     setDetectionSettings(defaultSettings);
     setGlobalSettings({
+      // Basic detections
       faceDetection: true,
       gazeDetection: true,
-      phoneDetection: true,
       mouthDetection: true,
       multiplePeopleDetection: true,
       audioDetection: true,
+      
+      // Enhanced detections
+      handGestureDetection: true,
+      handFaceInteraction: true,
+      tabSwitchDetection: true,
+      mouseDetection: true,
+      headPoseDetection: true,
+      
+      // Attempts settings
       maxAttempts: 10,
       autoDisconnect: true
     });
@@ -390,16 +425,6 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
     alert('✅ All detection settings and attempts reset to default');
   };
 
-  const updateCustomMessage = (studentSocketId, message) => {
-    setDetectionSettings(prev => ({
-      ...prev,
-      [studentSocketId]: {
-        ...prev[studentSocketId],
-        customMessage: message
-      }
-    }));
-  };
-
   const getDetectionStatusColor = (isEnabled) => {
     return isEnabled ? '#4CAF50' : '#f44336';
   };
@@ -408,20 +433,11 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
     return isEnabled ? 'ON' : 'OFF';
   };
 
-  // ✅ ADDED: Get attempts display color
   const getAttemptsColor = (attemptsLeft, maxAttempts) => {
     const percentage = (attemptsLeft / maxAttempts) * 100;
     if (percentage <= 20) return '#f44336';
     if (percentage <= 50) return '#ff9800';
     return '#4CAF50';
-  };
-
-  // ✅ ADDED: Get attempts text
-  const getAttemptsText = (studentSocketId) => {
-    const attempts = studentAttempts[studentSocketId];
-    if (!attempts) return '10 left';
-    
-    return `${attempts.attemptsLeft}/${attempts.maxAttempts} left`;
   };
 
   if (students.length === 0) {
@@ -480,9 +496,11 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
           </div>
         </div>
 
-        {/* Global Toggle Buttons */}
+        {/* Global Toggle Grid - ALL DETECTION TYPES */}
         <div className="global-toggle-grid">
+          {/* Basic Detections */}
           <div className="global-toggle-item">
+
             <span className="toggle-label">👁️ Face Detection</span>
             <button 
               className={`toggle-btn ${globalSettings.faceDetection ? 'enabled' : 'disabled'}`}
@@ -533,6 +551,58 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
               {getDetectionStatusText(globalSettings.audioDetection)}
             </button>
           </div>
+
+          {/* Enhanced Detections */}
+          <div className="global-toggle-item">
+            <span className="toggle-label">🤚 Hand Gestures</span>
+            <button 
+              className={`toggle-btn ${globalSettings.handGestureDetection ? 'enabled' : 'disabled'}`}
+              onClick={() => toggleGlobalDetection('handGestureDetection')}
+            >
+              {getDetectionStatusText(globalSettings.handGestureDetection)}
+            </button>
+          </div>
+
+          <div className="global-toggle-item">
+            <span className="toggle-label">✋ Hand-Face Interaction</span>
+            <button 
+              className={`toggle-btn ${globalSettings.handFaceInteraction ? 'enabled' : 'disabled'}`}
+              onClick={() => toggleGlobalDetection('handFaceInteraction')}
+            >
+              {getDetectionStatusText(globalSettings.handFaceInteraction)}
+            </button>
+          </div>
+
+          <div className="global-toggle-item">
+            <span className="toggle-label">💻 Tab Switching</span>
+            <button 
+              className={`toggle-btn ${globalSettings.tabSwitchDetection ? 'enabled' : 'disabled'}`}
+              onClick={() => toggleGlobalDetection('tabSwitchDetection')}
+            >
+              {getDetectionStatusText(globalSettings.tabSwitchDetection)}
+            </button>
+          </div>
+
+          <div className="global-toggle-item">
+            <span className="toggle-label">🖱️ Mouse Usage</span>
+            <button 
+              className={`toggle-btn ${globalSettings.mouseDetection ? 'enabled' : 'disabled'}`}
+              onClick={() => toggleGlobalDetection('mouseDetection')}
+            >
+              {getDetectionStatusText(globalSettings.mouseDetection)}
+            </button>
+          </div>
+
+          <div className="global-toggle-item">
+            <span className="toggle-label">🧠 Head Pose</span>
+            <button 
+              className={`toggle-btn ${globalSettings.headPoseDetection ? 'enabled' : 'disabled'}`}
+              onClick={() => toggleGlobalDetection('headPoseDetection')}
+            >
+              {getDetectionStatusText(globalSettings.headPoseDetection)}
+            </button>
+          </div>
+        
         </div>
       </div>
 
@@ -569,7 +639,6 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
                   </div>
                   
                   <div className="student-status-minimal">
-                    {/* ✅ ADDED: Attempts Display */}
                     <div 
                       className="attempts-display"
                       style={{ color: getAttemptsColor(attemptsLeft, maxAttempts) }}
@@ -602,7 +671,7 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
                 {/* Expanded Controls */}
                 {expandedStudent === student.socketId && (
                   <div className="student-detailed-controls">
-                    {/* ✅ ADDED: Attempts Management Section */}
+                    {/* Attempts Management Section */}
                     <div className="attempts-management-section">
                       <h5>🔄 Attempts Management</h5>
                       <div className="attempts-info">
@@ -688,7 +757,6 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
                               }
                             });
                             setDetectionSettings(newSettings);
-                            sendCustomDetectionSetting(student.socketId);
                           }}
                         >
                           ✅ Enable All
@@ -706,7 +774,6 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
                               }
                             });
                             setDetectionSettings(newSettings);
-                            sendCustomDetectionSetting(student.socketId);
                           }}
                         >
                           ❌ Disable All
@@ -717,7 +784,6 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
                             const newSettings = { ...detectionSettings };
                             newSettings[student.socketId] = { ...globalSettings, customMessage: '' };
                             setDetectionSettings(newSettings);
-                            sendCustomDetectionSetting(student.socketId);
                           }}
                         >
                           🔄 Reset to Global
@@ -735,12 +801,13 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
                       </button>
                     </div>
                     
-                    {/* Individual Detection Toggles */}
+                    {/* Individual Detection Toggles - ALL TYPES */}
                     <div className="detection-toggles-detailed">
                       <h5>Detection Settings</h5>
                       <div className="toggle-grid-detailed">
+                        {/* Basic Detections */}
                         <div className="toggle-item-detailed">
-                          <span className="toggle-label-detailed">Face Detection</span>
+                          <span className="toggle-label-detailed">👁️ Face Detection</span>
                           <button 
                             className={`toggle-btn-detailed ${
                               detectionSettings[student.socketId]?.faceDetection ? 'enabled' : 'disabled'
@@ -752,7 +819,7 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
                         </div>
                         
                         <div className="toggle-item-detailed">
-                          <span className="toggle-label-detailed">Gaze Detection</span>
+                          <span className="toggle-label-detailed">👀 Gaze Detection</span>
                           <button 
                             className={`toggle-btn-detailed ${
                               detectionSettings[student.socketId]?.gazeDetection ? 'enabled' : 'disabled'
@@ -763,10 +830,10 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
                           </button>
                         </div>
                         
-                        
+              
                         
                         <div className="toggle-item-detailed">
-                          <span className="toggle-label-detailed">Mouth Detection</span>
+                          <span className="toggle-label-detailed">🗣️ Mouth Detection</span>
                           <button 
                             className={`toggle-btn-detailed ${
                               detectionSettings[student.socketId]?.mouthDetection ? 'enabled' : 'disabled'
@@ -778,7 +845,7 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
                         </div>
                         
                         <div className="toggle-item-detailed">
-                          <span className="toggle-label-detailed">Multiple People</span>
+                          <span className="toggle-label-detailed">👥 Multiple People</span>
                           <button 
                             className={`toggle-btn-detailed ${
                               detectionSettings[student.socketId]?.multiplePeopleDetection ? 'enabled' : 'disabled'
@@ -789,54 +856,85 @@ if (attemptsLeft <= 0 && studentSettings.autoDisconnect) {
                           </button>
                         </div>
                         
-                       
+                        <div className="toggle-item-detailed">
+                          <span className="toggle-label-detailed">🎤 Audio Detection</span>
+                          <button 
+                            className={`toggle-btn-detailed ${
+                              detectionSettings[student.socketId]?.audioDetection ? 'enabled' : 'disabled'
+                            }`}
+                            onClick={() => toggleStudentDetection(student.socketId, 'audioDetection')}
+                          >
+                            {getDetectionStatusText(detectionSettings[student.socketId]?.audioDetection)}
+                          </button>
+                        </div>
+
+                        {/* Enhanced Detections */}
+                        <div className="toggle-item-detailed">
+                          <span className="toggle-label-detailed">🤚 Hand Gestures</span>
+                          <button 
+                            className={`toggle-btn-detailed ${
+                              detectionSettings[student.socketId]?.handGestureDetection ? 'enabled' : 'disabled'
+                            }`}
+                            onClick={() => toggleStudentDetection(student.socketId, 'handGestureDetection')}
+                          >
+                            {getDetectionStatusText(detectionSettings[student.socketId]?.handGestureDetection)}
+                          </button>
+                        </div>
+
+                        <div className="toggle-item-detailed">
+                          <span className="toggle-label-detailed">✋ Hand-Face Interaction</span>
+                          <button 
+                            className={`toggle-btn-detailed ${
+                              detectionSettings[student.socketId]?.handFaceInteraction ? 'enabled' : 'disabled'
+                            }`}
+                            onClick={() => toggleStudentDetection(student.socketId, 'handFaceInteraction')}
+                          >
+                            {getDetectionStatusText(detectionSettings[student.socketId]?.handFaceInteraction)}
+                          </button>
+                        </div>
+
+                        <div className="toggle-item-detailed">
+                          <span className="toggle-label-detailed">💻 Tab Switching</span>
+                          <button 
+                            className={`toggle-btn-detailed ${
+                              detectionSettings[student.socketId]?.tabSwitchDetection ? 'enabled' : 'disabled'
+                            }`}
+                            onClick={() => toggleStudentDetection(student.socketId, 'tabSwitchDetection')}
+                          >
+                            {getDetectionStatusText(detectionSettings[student.socketId]?.tabSwitchDetection)}
+                          </button>
+                        </div>
+
+                        <div className="toggle-item-detailed">
+                          <span className="toggle-label-detailed">🖱️ Mouse Usage</span>
+                          <button 
+                            className={`toggle-btn-detailed ${
+                              detectionSettings[student.socketId]?.mouseDetection ? 'enabled' : 'disabled'
+                            }`}
+                            onClick={() => toggleStudentDetection(student.socketId, 'mouseDetection')}
+                          >
+                            {getDetectionStatusText(detectionSettings[student.socketId]?.mouseDetection)}
+                          </button>
+                        </div>
+
+                        <div className="toggle-item-detailed">
+                          <span className="toggle-label-detailed">🧠 Head Pose</span>
+                          <button 
+                            className={`toggle-btn-detailed ${
+                              detectionSettings[student.socketId]?.headPoseDetection ? 'enabled' : 'disabled'
+                            }`}
+                            onClick={() => toggleStudentDetection(student.socketId, 'headPoseDetection')}
+                          >
+                            {getDetectionStatusText(detectionSettings[student.socketId]?.headPoseDetection)}
+                          </button>
+                        </div>
                       </div>
+                      <div className="toggle-item-detailed">
+  
+</div>
                     </div>
 
-                    {/* Custom Message */}
-                    <div className="custom-message-section-detailed">
-                      <h5>Custom Message</h5>
-                      <div className="message-input-group-detailed">
-                        <input
-                          type="text"
-                          placeholder="Send a custom message or instruction to this student..."
-                          value={detectionSettings[student.socketId]?.customMessage || ''}
-                          onChange={(e) => updateCustomMessage(student.socketId, e.target.value)}
-                          className="message-input-detailed"
-                          maxLength={200}
-                        />
-                        <button 
-                          className="send-message-btn-detailed"
-                          onClick={() => sendCustomDetectionSetting(student.socketId)}
-                          disabled={!socket}
-                        >
-                          Send Message
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Quick Actions */}
-                    <div className="quick-actions-detailed">
-                      <h5>Quick Actions</h5>
-                      <div className="action-buttons-detailed">
-                        <button 
-                          className="action-btn-detailed request-camera"
-                          onClick={() => {
-                            if (socket) {
-                              socket.emit('request-student-camera', {
-                                studentSocketId: student.socketId,
-                                roomId: `exam-${examId}`
-                              });
-                              alert(`📹 Camera request sent to ${student.name}`);
-                            }
-                          }}
-                        >
-                          📹 Request Camera Access
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* ✅ ADDED: Violation History */}
+                    {/* Violation History */}
                     {attempts?.history && attempts.history.length > 0 && (
                       <div className="violation-history-section">
                         <h5>⚠️ Violation History</h5>

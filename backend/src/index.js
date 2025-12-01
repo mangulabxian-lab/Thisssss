@@ -9,6 +9,8 @@ const cookieParser = require("cookie-parser");
 const path = require("path");
 const jwt = require("jsonwebtoken");
 const ChatMessage = require("./models/ChatMessage"); // ✅ ADD CHAT MESSAGE MODEL
+const adminAuthRoutes = require('./routes/adminAuth');
+const adminDashboardRoutes = require('./routes/adminDashboard');
 
 // ✅ LOAD ENV FIRST
 dotenv.config();
@@ -58,6 +60,11 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+
+//========ADMIN============
+app.use('/api/admin/auth', adminAuthRoutes);
+app.use('/api/admin/dashboard', adminDashboardRoutes);
 
 // ===== ROUTES =====
 app.use("/api/auth", require("./routes/auth"));
@@ -162,6 +169,8 @@ io.use((socket, next) => {
   }
 });
 
+
+
 // ===== SOCKET.IO ROOM MANAGEMENT =====
 const examRooms = new Map();
 const pendingCameraRequests = new Set();
@@ -170,6 +179,32 @@ io.on("connection", (socket) => {
   console.log("✅ Socket connected:", socket.id, "User:", socket.userName, "Role:", socket.userRole);
 
   let currentRoom = null;
+  
+
+
+  // ===== ATTEMPTS PERSISTENCE =====
+const studentAttemptsStorage = new Map(); // Store attempts by student ID
+
+// Function to get student attempts
+const getStudentAttempts = (studentId, examId) => {
+  const key = `${examId}_${studentId}`;
+  if (!studentAttemptsStorage.has(key)) {
+    studentAttemptsStorage.set(key, {
+      currentAttempts: 0,
+      maxAttempts: 10,
+      attemptsLeft: 10,
+      history: []
+    });
+  }
+  return studentAttemptsStorage.get(key);
+};
+
+// Function to save student attempts
+const saveStudentAttempts = (studentId, examId, attempts) => {
+  const key = `${examId}_${studentId}`;
+  studentAttemptsStorage.set(key, attempts);
+};
+
 
   // ===== CLASS CHAT HANDLERS =====
   socket.on("join-class-chat", async ({ classId }) => {
@@ -209,6 +244,7 @@ io.on("connection", (socket) => {
       console.error('❌ Error joining class chat:', error);
     }
   });
+
 
   // ✅ ADDED: Main class chat message handler
   socket.on("send-chat-message", async (data) => {
@@ -260,6 +296,8 @@ io.on("connection", (socket) => {
     }
   });
 
+
+  
   // ✅ ADD THIS NEW HANDLER FOR EXAM CHAT (after the class chat handlers)
   socket.on("send-exam-chat-message", async (data) => {
     try {
@@ -339,13 +377,117 @@ socket.on('proctoring-alert', (data) => {
   }
 });
 
-// ✅ DAGDAG - STUDENT VIOLATION ALERTS
+
+
+
+
+// Manual violation from teacher
+socket.on('manual-violation', (data) => {
+  console.log(`⚠️ Manual violation for ${data.studentSocketId}: ${data.violationType}`);
+  
+  // ✅ CORRECT: Use io.to() instead of sio.emit()
+  io.to(`exam-${data.examId}`).emit('student-violation', {
+    studentSocketId: data.studentSocketId,
+    violationType: data.violationType,
+    severity: 'manual',
+    examId: data.examId,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Auto violations from proctoring
+socket.on('proctoring-violation', (data) => {
+  console.log(`⚠️ Auto violation for ${data.studentSocketId}: ${data.violationType}`);
+  
+  // ✅ CORRECT: Use io.to() instead of sio.emit()
+  io.to(`exam-${data.examId}`).emit('student-violation', {
+    studentSocketId: data.studentSocketId,
+    violationType: data.violationType,
+    severity: data.severity || 'auto',
+    examId: data.examId,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ✅ DAGDAG - STUDENT VIOLATION ALERTS (eto yung existing mo na tama)
+// REPLACE the existing student-violation handler with this:
 socket.on('student-violation', (data) => {
-  console.log('⚠️ Student violation:', data);
-  if (data.examId) {
-    io.to(`exam-${data.examId}`).emit('student-violation', data);
+  console.log('🚨 Student violation detected:', data);
+  
+  const { studentSocketId, violationType, severity, examId } = data;
+  
+  // Get student info to get their actual student ID
+  const studentInfo = connected_clients[studentSocketId];
+  const studentId = studentInfo?.userId || studentSocketId;
+  
+  // Get current attempts from storage
+  const currentAttempts = getStudentAttempts(studentId, examId);
+  
+  const newAttempts = currentAttempts.currentAttempts + 1;
+  const attemptsLeft = Math.max(0, currentAttempts.maxAttempts - newAttempts);
+  
+  const updatedAttempts = {
+    ...currentAttempts,
+    currentAttempts: newAttempts,
+    attemptsLeft: attemptsLeft,
+    history: [
+      ...currentAttempts.history,
+      {
+        timestamp: new Date().toISOString(),
+        violationType: violationType,
+        severity: severity,
+        attemptsUsed: newAttempts,
+        attemptsLeft: attemptsLeft
+      }
+    ].slice(-10)
+  };
+  
+  // Save to persistent storage
+  saveStudentAttempts(studentId, examId, updatedAttempts);
+  
+  // Broadcast to teacher
+  io.to(`exam-${examId}`).emit('student-violation', {
+    ...data,
+    studentId: studentId,
+    currentAttempts: newAttempts,
+    attemptsLeft: attemptsLeft
+  });
+  
+  // Auto-disconnect logic
+  if (attemptsLeft <= 0) {
+    console.log(`🔌 Auto-disconnecting student ${studentSocketId} - attempts exhausted`);
+    socket.to(studentSocketId).emit('teacher-disconnect', {
+      reason: 'Attempts exhausted',
+      examId: examId
+    });
   }
 });
+
+// Add this AFTER the student-violation handler
+socket.on('request-attempts-sync', (data) => {
+  const { studentId, examId, studentSocketId } = data;
+  
+  console.log(`🔄 Student requesting attempts sync:`, { studentId, examId, studentSocketId });
+  
+  const attempts = getStudentAttempts(studentId, examId);
+  
+  // Send attempts back to student
+  socket.emit('attempts-sync-response', {
+    studentId: studentId,
+    examId: examId,
+    attempts: attempts
+  });
+  
+  // Also update teacher
+  if (examId) {
+    socket.to(`exam-${examId}`).emit('student-attempts-update', {
+      studentSocketId: studentSocketId,
+      studentId: studentId,
+      attempts: attempts
+    });
+  }
+});
+
   socket.on("delete-chat-message", async (data) => {
     try {
       const { messageId, classId } = data;
@@ -550,13 +692,15 @@ const formatTime = (seconds) => {
       socket.userRole = userRole;
       
       // Initialize room if not exists
-      if (!examRooms.has(roomId)) {
-        examRooms.set(roomId, {
-          teacher: null,
-          students: new Map()
-        });
-      }
-
+     if (!examRooms.has(roomId)) {
+    examRooms.set(roomId, {
+      teacher: null,
+      students: new Map(),
+      timeLeft: 3600, // Default 1 hour
+      isTimerRunning: false,
+      examStarted: false
+    });
+  }
       const room = examRooms.get(roomId);
       
       if (userRole === 'teacher') {

@@ -17,9 +17,19 @@ import tempfile
 import threading
 from collections import deque
 import time
-import requests  # IDAGDAG ITO SA IMPORTS
 from collections import defaultdict
+import pytesseract
+from PIL import Image
+import io
 
+# Add near other global variables
+student_attempts = defaultdict(lambda: {
+    'current_attempts': 0,
+    'max_attempts': 10,
+    'attempts_left': 10,
+    'violation_history': [],
+    'last_violation_time': None
+})
 
 # Add this global variable to track mouse movement
 mouse_movement_tracker = defaultdict(lambda: {
@@ -28,6 +38,17 @@ mouse_movement_tracker = defaultdict(lambda: {
     'stationary_start_time': None,
     'is_stationary_alert_sent': False
 })
+
+# Add near the top with other global variables
+tab_switch_tracker = defaultdict(lambda: {
+    'count': 0,
+    'last_switch_time': None,
+    'history': []
+})
+
+screenshot_detection_enabled = True
+screenshot_violations = defaultdict(list)
+
 # Initialize Flask app FIRST
 app = Flask(__name__)
 CORS(app)
@@ -72,7 +93,6 @@ connected_clients = {}
 audio_data_buffer = deque(maxlen=100)
 detection_history = deque(maxlen=50)  # Track detection history for better accuracy
 
-
 @sio.event
 def connect(sid, environ):
     print(f"✅ Client connected: {sid}")
@@ -81,16 +101,19 @@ def connect(sid, environ):
         'user_role': None,
         'exam_id': None,
         'audio_alerts': 0,
+        'screenshot_alerts': 0,
         'last_audio_alert': None,
+        'last_screenshot_alert': None,
         'detection_stats': {
             'face_detected_count': 0,
             'total_frames': 0,
             'recent_gaze': [],
-            'recent_head_pose': []
-        }
+            'recent_head_pose': [],
+            'screenshot_attempts': 0,
+            'tab_switches': 0
+        },
+        'detection_settings': {}
     }
-
-# Sa server.py - ADD THESE SOCKET EVENTS:
 
 @sio.event
 def manual_violation(sid, data):
@@ -125,7 +148,6 @@ def disconnect_student(sid, data):
         'examId': exam_id
     }, room=student_socket_id)
 
-
 @sio.event
 def join_exam(sid, data):
     """When student joins an exam"""
@@ -144,11 +166,269 @@ def disconnect(sid):
     if sid in connected_clients:
         del connected_clients[sid]
 
+@sio.event
+def tab_switch_detected(sid, data):
+    """Handle tab switch detection from student"""
+    try:
+        print(f"💻 Tab switch detected from student {sid}")
+        
+        exam_id = data.get('examId')
+        student_socket_id = sid
+        timestamp = data.get('timestamp')
+        count = data.get('count', 1)
+        
+        # ✅ CHECK IF TAB SWITCH DETECTION IS ENABLED FOR THIS STUDENT
+        client_info = connected_clients.get(student_socket_id, {})
+        
+        # Get detection settings from client (if available)
+        detection_settings = client_info.get('detection_settings', {})
+        
+        # If tab switch detection is explicitly disabled, ignore it
+        if detection_settings.get('tabSwitchDetection') is False:
+            print(f"🛑 Tab switch detection disabled for student {student_socket_id} - ignoring")
+            return {"status": "ignored", "reason": "tab_switch_detection_disabled"}
+        
+        # Update tracking
+        if exam_id and student_socket_id:
+            key = f"{exam_id}_{student_socket_id}"
+            tab_switch_tracker[key]['count'] = count
+            tab_switch_tracker[key]['last_switch_time'] = timestamp
+            tab_switch_tracker[key]['history'].append({
+                'timestamp': timestamp,
+                'count': count,
+                'student_socket_id': student_socket_id
+            })
+            
+            # Keep only recent history
+            if len(tab_switch_tracker[key]['history']) > 20:
+                tab_switch_tracker[key]['history'] = tab_switch_tracker[key]['history'][-20:]
+        
+        # ✅ IMPORTANTE: GUMAMIT NG send_proctoring_alert PARA MA-UPDATE ANG ATTEMPTS
+        if exam_id and student_socket_id:
+            print(f"📊 Using send_proctoring_alert for student {student_socket_id}")
+            
+            send_proctoring_alert(exam_id, {
+                "message": f"💻 Tab switch detected (Count: {count})",
+                "type": "danger",
+                "severity": "high",
+                "timestamp": datetime.now().isoformat(),
+                "studentSocketId": student_socket_id,
+                "detectionType": "tab_switching",
+                "count": count
+            })
+        
+        return {"status": "tab_switch_logged", "count": count}
+        
+    except Exception as e:
+        print(f"Tab switch detection error: {e}")
+        return {"error": str(e)}
+
+@sio.event
+def update_detection_settings(sid, data):
+    """Update detection settings for a student"""
+    try:
+        student_socket_id = data.get('studentSocketId')
+        settings = data.get('settings', {})
+        
+        if student_socket_id in connected_clients:
+            connected_clients[student_socket_id]['detection_settings'] = settings
+            print(f"🎯 Updated detection settings for student {student_socket_id}: {settings}")
+            
+            # Forward the settings to the student
+            sio.emit('detection-settings-update', {
+                'settings': settings,
+                'customMessage': data.get('customMessage', '')
+            }, room=student_socket_id)
+            
+            return {"status": "settings_updated"}
+        else:
+            return {"error": "Student not found"}
+            
+    except Exception as e:
+        print(f"Update detection settings error: {e}")
+        return {"error": str(e)}
+
+@sio.event
+def update_student_attempts(sid, data):
+    """Update student attempts from teacher"""
+    try:
+        student_socket_id = data.get('studentSocketId')
+        attempts_data = data.get('attempts')
+        exam_id = data.get('examId')
+        
+        if student_socket_id and exam_id:
+            key = f"{exam_id}_{student_socket_id}"
+            
+            # Store attempts data
+            student_attempts[key] = {
+                'current_attempts': attempts_data.get('currentAttempts', 0),
+                'max_attempts': attempts_data.get('maxAttempts', 10),
+                'attempts_left': attempts_data.get('attemptsLeft', 10),
+                'violation_history': attempts_data.get('history', []),
+                'last_updated': datetime.now().isoformat()
+            }
+            
+            # Send to student if connected
+            sio.emit('attempts-update', {
+                'attempts': student_attempts[key],
+                'studentSocketId': student_socket_id,
+                'examId': exam_id
+            }, room=student_socket_id)
+            
+            return {"status": "attempts_updated"}
+            
+    except Exception as e:
+        print(f"Update student attempts error: {e}")
+        return {"error": str(e)}
+
+@sio.event
+def get_student_attempts(sid, data):
+    """Get current attempts for a student"""
+    try:
+        student_socket_id = data.get('studentSocketId')
+        exam_id = data.get('examId')
+        
+        if student_socket_id and exam_id:
+            key = f"{exam_id}_{student_socket_id}"
+            attempts = student_attempts.get(key, {
+                'current_attempts': 0,
+                'max_attempts': 10,
+                'attempts_left': 10,
+                'violation_history': []
+            })
+            
+            return {"attempts": attempts}
+            
+    except Exception as e:
+        print(f"Get student attempts error: {e}")
+        return {"error": str(e)}
+
+@sio.event
+def store_detection_settings(sid, data):
+    """Store detection settings from student"""
+    try:
+        settings = data.get('settings', {})
+        exam_id = data.get('examId')
+        
+        if sid in connected_clients:
+            connected_clients[sid]['detection_settings'] = settings
+            print(f"💾 Stored detection settings for student {sid}: {settings}")
+            return {"status": "settings_stored"}
+        else:
+            return {"error": "Student not connected"}
+            
+    except Exception as e:
+        print(f"Store detection settings error: {e}")
+        return {"error": str(e)}
+
 def send_proctoring_alert(exam_id, alert_data):
-    """Send proctoring alert to specific exam room"""
-    room = f"exam-{exam_id}"
-    sio.emit('proctoring-alert', alert_data, room=room)
-    print(f"🚨 Sent proctoring alert to exam {exam_id}: {alert_data}")
+    """Send proctoring alert to specific exam room with attempts tracking"""
+    try:
+        print(f"🚨 [DEBUG] send_proctoring_alert called for exam {exam_id}")
+        print(f"🚨 [DEBUG] Student Socket ID: {alert_data.get('studentSocketId')}")
+        print(f"🚨 [DEBUG] Detection Type: {alert_data.get('detectionType')}")
+        
+        room = f"exam-{exam_id}"
+        student_socket_id = alert_data.get('studentSocketId')
+        
+        if not student_socket_id:
+            print(f"❌ [DEBUG] No studentSocketId in alert data!")
+            return
+        
+        print(f"🚨 [DEBUG] Processing for student {student_socket_id}")
+        
+        if student_socket_id:
+            # Get current attempts
+            key = f"{exam_id}_{student_socket_id}"
+            attempts = student_attempts.get(key, {
+                'current_attempts': 0,
+                'max_attempts': 10,
+                'attempts_left': 10,
+                'violation_history': []
+            })
+            
+            # ✅ DEDUCT ATTEMPTS FOR ALL VIOLATION TYPES
+            should_deduct = True  # Always deduct for any violation
+
+            # Get detection type    
+            detection_type = alert_data.get('detectionType', 'unknown')
+
+            # Determine severity level
+            major_violations = [
+                'tab_switching',
+                'multiple_people', 
+                'no_face_detected', 
+                'multiple_screen_indicators',
+                'speaking_detected',
+                'loud_noise_detected',
+                'low_attention_score'
+            ]
+
+            minor_violations = [
+                'gaze_deviation', 'head_pose_deviation', 'mouth_movement',
+                'mouse_usage', 'suspicious_gesture', 'audio_detection'
+            ]
+
+            if detection_type in major_violations:
+                severity_multiplier = 1.0  # Full attempt for major violations
+            elif detection_type in minor_violations:
+                severity_multiplier = 0.5  # Half attempt for minor violations
+            else:
+                severity_multiplier = 0.5  # Default to half attempt
+            
+            if should_deduct:
+                attempts['current_attempts'] += severity_multiplier
+                attempts['attempts_left'] = max(0, attempts['max_attempts'] - attempts['current_attempts'])
+                
+                # Add to violation history
+                attempts['violation_history'].append({
+                    'timestamp': datetime.now().isoformat(),
+                    'type': detection_type,
+                    'message': alert_data.get('message', ''),
+                    'severity': alert_data.get('severity', 'medium'),
+                    'attempts_used': attempts['current_attempts'],
+                    'attempts_left': attempts['attempts_left'],
+                    'deducted': severity_multiplier
+                })
+                
+                # Keep only last 50 violations
+                if len(attempts['violation_history']) > 50:
+                    attempts['violation_history'] = attempts['violation_history'][-50:]
+                
+                student_attempts[key] = attempts
+                
+                # Add attempts info to alert
+                alert_data['attemptsInfo'] = {
+                    'currentAttempts': attempts['current_attempts'],
+                    'maxAttempts': attempts['max_attempts'],
+                    'attemptsLeft': attempts['attempts_left'],
+                    'violationCount': len(attempts['violation_history']),
+                    'deductedThisTime': severity_multiplier
+                }
+            
+            # Check if attempts exhausted
+            if attempts['attempts_left'] <= 0:
+                # Send disconnect command to student
+                disconnect_reason = f"Attempts exhausted ({attempts['current_attempts']:.1f}/{attempts['max_attempts']} violations)"
+                
+                sio.emit('teacher-disconnect', {
+                    'reason': disconnect_reason,
+                    'examId': exam_id
+                }, room=student_socket_id)
+                
+                # Also send disconnect to teacher
+                sio.emit('student-disconnected', {
+                    'studentSocketId': student_socket_id,
+                    'reason': disconnect_reason,
+                    'examId': exam_id,
+                    'attemptsUsed': attempts['current_attempts']
+                }, room=room)
+        
+        sio.emit('proctoring-alert', alert_data, room=room)
+        print(f"🚨 Sent proctoring alert to exam {exam_id}: {alert_data}")
+        
+    except Exception as e:
+        print(f"Error sending proctoring alert: {e}")
 
 def decode_image(image_base64):
     """Decode base64 → OpenCV image with enhanced error handling"""
@@ -266,6 +546,207 @@ def get_gaze_direction_enhanced(face_landmarks, w, h):
     except Exception as e:
         print(f"Enhanced gaze detection error: {e}")
         return "unknown", True, False, 0
+
+# ILAGAY AFTER NG get_gaze_direction_enhanced() at BEFORE ng socket events
+
+# ==================== SCREENSHOT DETECTION FUNCTIONS ====================
+
+def detect_screenshot_activity(image, exam_id, student_id):
+    """Detect potential screenshot activity using multiple methods"""
+    try:
+        violations = []
+        confidence = 0.0
+        
+        # Method 1: Detect screenshot tools/windows in the image
+        screenshot_detected, screenshot_confidence = detect_screenshot_tools(image)
+        if screenshot_detected:
+            violations.append("screenshot_tool_detected")
+            confidence = max(confidence, screenshot_confidence)
+        
+        # Method 2: Detect screen capture artifacts
+        capture_artifacts, artifacts_confidence = detect_capture_artifacts(image)
+        if capture_artifacts:
+            violations.append("screen_capture_artifacts")
+            confidence = max(confidence, artifacts_confidence)
+        
+        # Method 3: Detect multiple monitors/windows
+        multi_screen, multi_confidence = detect_multiple_screens(image)
+        if multi_screen:
+            violations.append("multiple_screen_indicators")
+            confidence = max(confidence, multi_confidence)
+        
+        # Method 4: Text analysis for screenshot-related content
+        screenshot_text, text_confidence = analyze_screenshot_text(image)
+        if screenshot_text:
+            violations.append("screenshot_related_text")
+            confidence = max(confidence, text_confidence)
+        
+        # Log the violation
+        if violations and exam_id:
+            timestamp = datetime.now().isoformat()
+            violation_data = {
+                "type": "screenshot_attempt",
+                "violations": violations,
+                "confidence": confidence,
+                "timestamp": timestamp,
+                "student_id": student_id
+            }
+            
+            # Store in global tracking
+            if exam_id not in screenshot_violations:
+                screenshot_violations[exam_id] = []
+            screenshot_violations[exam_id].append(violation_data)
+            
+            # Keep only recent violations
+            if len(screenshot_violations[exam_id]) > 50:
+                screenshot_violations[exam_id] = screenshot_violations[exam_id][-50:]
+        
+        return violations, confidence
+        
+    except Exception as e:
+        print(f"Screenshot detection error: {e}")
+        return [], 0.0
+
+def detect_screenshot_tools(image):
+    """Detect screenshot tools and windows in the image"""
+    try:
+        # Convert to RGB for better processing
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        h, w = rgb_image.shape[:2]
+        
+        # Look for common screenshot tool indicators
+        tool_indicators = []
+        
+        # 1. Detect color patterns of common screenshot tools
+        blue_mask = cv2.inRange(rgb_image, (100, 100, 200), (150, 150, 255))
+        orange_mask = cv2.inRange(rgb_image, (200, 100, 0), (255, 150, 50))
+        green_mask = cv2.inRange(rgb_image, (0, 150, 0), (100, 255, 100))
+        
+        blue_pixels = cv2.countNonZero(blue_mask)
+        orange_pixels = cv2.countNonZero(orange_mask)
+        green_pixels = cv2.countNonZero(green_mask)
+        
+        total_pixels = h * w
+        
+        # Check for significant colored areas (potential tool overlays)
+        if blue_pixels / total_pixels > 0.01:
+            tool_indicators.append(("blue_tool_overlay", blue_pixels / total_pixels))
+        if orange_pixels / total_pixels > 0.01:
+            tool_indicators.append(("orange_tool_overlay", orange_pixels / total_pixels))
+        if green_pixels / total_pixels > 0.01:
+            tool_indicators.append(("green_tool_overlay", green_pixels / total_pixels))
+        
+        # 2. Detect rectangular selection areas (common in screenshot tools)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # Find contours
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        selection_boxes = 0
+        for contour in contours:
+            epsilon = 0.02 * cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            
+            if len(approx) == 4:
+                area = cv2.contourArea(contour)
+                if area > 1000:
+                    selection_boxes += 1
+        
+        if selection_boxes > 0:
+            tool_indicators.append(("selection_boxes", min(1.0, selection_boxes * 0.3)))
+        
+        # Calculate overall confidence
+        if tool_indicators:
+            total_confidence = sum(conf for _, conf in tool_indicators)
+            avg_confidence = total_confidence / len(tool_indicators)
+            return True, min(avg_confidence, 1.0)
+        
+        return False, 0.0
+        
+    except Exception as e:
+        print(f"Screenshot tools detection error: {e}")
+        return False, 0.0
+
+def detect_capture_artifacts(image):
+    """Detect screen capture artifacts"""
+    try:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        # Edge detection for rectangular patterns (common in screen capture)
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # Find contours that could be capture artifacts
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        artifact_count = 0
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if 500 < area < 50000:
+                artifact_count += 1
+        
+        # If many potential artifacts found
+        if artifact_count > 3:
+            return True, min(0.7, artifact_count * 0.1)
+        
+        return False, 0.0
+        
+    except Exception as e:
+        print(f"Capture artifacts detection error: {e}")
+        return False, 0.0
+
+def detect_multiple_screens(image):
+    """Detect multiple monitors or windows"""
+    try:
+        h, w = image.shape[:2]
+        
+        # Look for multiple distinct screen areas
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+        
+        # Count distinct bright areas (potential screens)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        screen_candidates = 0
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area > w * h * 0.1:  # At least 10% of image area
+                screen_candidates += 1
+        
+        if screen_candidates > 1:
+            return True, min(0.8, screen_candidates * 0.3)
+        
+        return False, 0.0
+        
+    except Exception as e:
+        print(f"Multiple screens detection error: {e}")
+        return False, 0.0
+
+def analyze_screenshot_text(image):
+    """Analyze text in image for screenshot-related content"""
+    try:
+        # Convert to PIL Image for OCR
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(rgb_image)
+        
+        # Perform OCR
+        text = pytesseract.image_to_string(pil_image).lower()
+        
+        screenshot_keywords = [
+            'screenshot', 'capture', 'snip', 'print screen', 'prtsc',
+            'snapshot', 'screen grab', 'recording', 'save as'
+        ]
+        
+        found_keywords = [keyword for keyword in screenshot_keywords if keyword in text]
+        
+        if found_keywords:
+            return True, min(0.9, len(found_keywords) * 0.3)
+        
+        return False, 0.0
+        
+    except Exception as e:
+        print(f"Text analysis error: {e}")
+        return False, 0.0
 
 def detect_mouth_movement_enhanced(face_landmarks):
     """ENHANCED mouth movement detection"""
@@ -547,6 +1028,104 @@ def detect_multiple_people_enhanced(face_results, img, w, h):
         print(f"Enhanced multiple people detection error: {e}")
         return False, 0.0
 
+# ==================== ENHANCED AUDIO DETECTION ====================
+def detect_audio_violations(audio_data, sample_rate=16000):
+    """Detect suspicious audio patterns"""
+    try:
+        if not audio_data:
+            return [], 0.0
+            
+        audio_array = np.frombuffer(audio_data, dtype=np.int16)
+        
+        if len(audio_array) == 0:
+            return [], 0.0
+        
+        # Calculate audio features
+        rms = audioop.rms(audio_data, 2)
+        fft = np.fft.fft(audio_array)
+        frequencies = np.fft.fftfreq(len(fft))
+        magnitude = np.abs(fft)
+        
+        # Voice detection
+        voice_mask = (np.abs(frequencies) > 85/sample_rate) & (np.abs(frequencies) < 255/sample_rate)
+        voice_energy = np.sum(magnitude[voice_mask])
+        total_energy = np.sum(magnitude)
+        voice_ratio = voice_energy / total_energy if total_energy > 0 else 0
+        
+        # Zero-crossing rate for speech detection
+        zero_crossings = np.sum(np.diff(np.signbit(audio_array)) != 0)
+        zcr = zero_crossings / len(audio_array)
+        
+        violations = []
+        confidence = 0.0
+        
+        # Detect speaking
+        if voice_ratio > 0.3 and rms > 500:
+            violations.append("speaking_detected")
+            confidence = min(1.0, voice_ratio + (rms / 2000))
+        
+        # Detect loud noises
+        elif rms > 1500:
+            violations.append("loud_noise_detected")
+            confidence = min(1.0, rms / 3000)
+        
+        return violations, confidence
+        
+    except Exception as e:
+        print(f"Audio violation detection error: {e}")
+        return [], 0.0
+
+# ==================== ENHANCED HAND GESTURE DETECTION ====================
+def detect_suspicious_gestures(hand_landmarks, face_center_x, face_center_y):
+    """Detect suspicious hand gestures"""
+    try:
+        if not hand_landmarks:
+            return [], 0.0
+            
+        violations = []
+        max_confidence = 0.0
+        
+        for landmarks in hand_landmarks:
+            # Get key hand points
+            wrist = landmarks.landmark[0]
+            thumb_tip = landmarks.landmark[4]
+            index_tip = landmarks.landmark[8]
+            middle_tip = landmarks.landmark[12]
+            pinky_tip = landmarks.landmark[20]
+            
+            # Calculate distances and positions
+            hand_face_distance = np.sqrt((wrist.x - face_center_x)**2 + (wrist.y - face_center_y)**2)
+            
+            # Detect hand covering face
+            if hand_face_distance < 0.1:
+                violations.append("hand_covering_face")
+                max_confidence = max(max_confidence, 0.8)
+            
+            # Detect pointing gestures
+            index_extended = index_tip.y < wrist.y - 0.05
+            other_fingers_closed = (middle_tip.y > wrist.y and thumb_tip.y > wrist.y and pinky_tip.y > wrist.y)
+            
+            if index_extended and other_fingers_closed:
+                violations.append("pointing_gesture")
+                max_confidence = max(max_confidence, 0.6)
+            
+            # Detect counting gestures (multiple fingers extended)
+            extended_fingers = 0
+            finger_tips = [4, 8, 12, 16, 20]  # thumb, index, middle, ring, pinky
+            for tip_idx in finger_tips:
+                if landmarks.landmark[tip_idx].y < wrist.y:
+                    extended_fingers += 1
+            
+            if extended_fingers >= 3:
+                violations.append("multiple_fingers_extended")
+                max_confidence = max(max_confidence, 0.5)
+        
+        return violations, max_confidence
+        
+    except Exception as e:
+        print(f"Hand gesture detection error: {e}")
+        return [], 0.0
+
 def analyze_audio_enhanced(audio_data, sample_rate=16000):
     """ENHANCED audio analysis with better detection"""
     try:
@@ -661,6 +1240,8 @@ def process_audio():
                         "type": alert_type,
                         "severity": "high" if audio_status == "speaking" else "medium",
                         "timestamp": current_time.isoformat(),
+                        "studentSocketId": student_id,
+                        "detectionType": "speaking_detected" if audio_status == "speaking" else "audio_detection",
                         "confidence": confidence
                     })
                     
@@ -678,421 +1259,23 @@ def process_audio():
         print(f"Audio processing error: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Sa server.py, palitan ang send_detection_to_teacher function:
-import requests  # IDAGDAG ITO SA IMPORTS
-
-def send_detection_to_teacher(exam_id, student_socket_id, detection_data):
-    """Send detection alerts to teacher via HTTP API"""
-    try:
-        alert_data = {
-            "studentSocketId": student_socket_id,
-            "message": detection_data.get("message", "Suspicious activity detected"),
-            "type": detection_data.get("type", "warning"),
-            "severity": detection_data.get("severity", "medium"),
-            "timestamp": datetime.now().isoformat(),
-            "details": detection_data.get("details", {}),
-            "confidence": detection_data.get("confidence", 0.0),
-            "detectionType": detection_data.get("detectionType", "unknown"),
-            "examId": exam_id,
-            "source": "python_backend"
-        }
-        
-        # ✅ FIX: Use HTTP API instead of direct socket
-        response = requests.post(
-            'http://localhost:3000/api/proctoring-alert',
-            json=alert_data,
-            headers={'Content-Type': 'application/json'},
-            timeout=5
-        )
-        
-        if response.status_code == 200:
-            print(f"✅ Proctoring alert sent to teacher via API: {alert_data['message']}")
-        else:
-            print(f"❌ Failed to send alert: {response.status_code}")
-            
-    except Exception as e:
-        print(f"❌ Error sending detection to teacher: {e}")
-
-# THIS LINE SHOULD BE AT THE SAME INDENT LEVEL AS THE PREVIOUS FUNCTION
-# Sa /detect endpoint, hanapin ang actual socket ID:
-# SA server.py, i-debug kung nakukuha ang socket ID:
+# Enhanced main detection endpoint - COMPLETELY UPDATED VERSION
 @app.route('/detect', methods=['POST'])
 def detect():
     try:
         start_time = time.time()
         data = request.json
-        
-        print(f"🎯 Received detection request from student")
-        
         if not data or 'image' not in data:
             return jsonify({"error": "No image data provided"}), 400
-        
-        # ✅ GET DATA
+            
+        # ✅ CRITICAL: Extract detection settings from request
         detection_settings = data.get('detection_settings', {})
-        exam_id = data.get('exam_id', 'unknown-exam')
-        student_id = data.get('student_id', 'unknown-student')
-        student_socket_id = data.get('student_socket_id', 'unknown-socket')  # ✅ ITO ANG BAGO
+        exam_id = data.get('exam_id')
+        student_id = data.get('student_id')
+        student_socket_id = data.get('student_socket_id')  # Get student socket ID
         
-        print(f"📊 Student Socket ID from request: {student_socket_id}")
-        print(f"🎓 Exam: {exam_id}, Student: {student_id}, Socket: {student_socket_id}")
+        print(f"🎯 Received detection from student {student_socket_id} with settings: {detection_settings}")
         
-        # ✅ DOUBLE CHECK SA CONNECTED CLIENTS
-        actual_socket_id = None
-        for sid, client_data in connected_clients.items():
-            if client_data.get('exam_id') == exam_id and client_data.get('user_role') == 'student':
-                actual_socket_id = sid
-                break
-        
-        print(f"🔍 Actual socket ID from connected clients: {actual_socket_id}")
-        
-        # Use the one from request as fallback
-        final_socket_id = student_socket_id if student_socket_id != 'unknown-socket' else actual_socket_id
-        print(f"🎯 Using socket ID: {final_socket_id}")
-        
-        # ... rest of the function
-        
-        # ✅ CHECK IF ALL DETECTIONS ARE DISABLED - RETURN EARLY
-        if detection_settings and not any([
-            detection_settings.get('faceDetection', True),
-            detection_settings.get('gazeDetection', True), 
-            detection_settings.get('phoneDetection', True),
-            detection_settings.get('mouthDetection', True),
-            detection_settings.get('multiplePeopleDetection', True),
-            detection_settings.get('audioDetection', True)
-        ]):
-            print("🛑 ALL DETECTIONS DISABLED - Returning minimal response")
-            return jsonify({
-                "faceDetected": False,
-                "faceCount": 0,
-                "gaze": "unknown",
-                "eyesOpen": True,
-                "headPose": "unknown",
-                "phoneDetected": False,
-                "mouseDetected": False,
-                "mouthMoving": False,
-                "multiplePeople": False,
-                "blinking": False,
-                "suspiciousActivities": [],
-                "attentionScore": 100,
-                "detectionConfidence": 0.0,
-                "processingTime": round((time.time() - start_time) * 1000, 2),
-                "message": "All detections disabled by teacher settings"
-            })
-            
-        img = decode_image(data['image'])
-        if img is None:
-            print("❌ Failed to decode image")
-            return jsonify({"error": "Invalid image"}), 400
-
-        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        h, w, _ = img.shape
-
-        # Initialize enhanced results
-        results = {
-            "faceDetected": False,
-            "faceCount": 0,
-            "gaze": "unknown",
-            "eyesOpen": True,
-            "headPose": "unknown",
-            "phoneDetected": False,
-            "mouseDetected": False,
-            "mouthMoving": False,
-            "multiplePeople": False,
-            "faceOccluded": False,
-            "blinking": False,
-            "suspiciousActivities": [],
-            "faceBoundingBox": None,
-            "eyeDetected": False,
-            "gazeForward": True,
-            "debugImage": None,
-            "attentionScore": 100,
-            "detectionConfidence": 0.0,
-            "processingTime": 0,
-            "enhancedFeatures": {
-                "gazeConfidence": 0.0,
-                "headPoseConfidence": 0.0,
-                "phoneConfidence": 0.0,
-                "mouseConfidence": 0.0,
-                "multiplePeopleConfidence": 0.0,
-                "mouthMovementConfidence": 0.0
-            }
-        }
-
-        # ✅ ONLY PROCESS FACE DETECTION IF ENABLED
-        face_results = None
-        if detection_settings.get('faceDetection', True):
-            try:
-                face_results = face_detector.process(rgb_img)
-                print(f"✅ Face detection completed: {len(face_results.detections) if face_results and face_results.detections else 0} faces")
-            except Exception as e:
-                print(f"❌ Face detection error: {e}")
-                face_results = None
-        else:
-            print("🛑 Face detection disabled - skipping")
-            results["faceDetected"] = False
-            results["faceCount"] = 0
-
-        # If face detection is disabled, skip ALL face-related processing
-        if not detection_settings.get('faceDetection', True):
-            print("🛑 All face-related processing skipped due to settings")
-            results["processingTime"] = round((time.time() - start_time) * 1000, 2)
-            return jsonify(results)
-
-        # Continue with face detection if enabled
-        if face_results and face_results.detections:
-            results["faceCount"] = len(face_results.detections)
-            results["faceDetected"] = True
-
-            # Process first face for detailed analysis
-            detection = face_results.detections[0]
-            bbox = detection.location_data.relative_bounding_box
-            
-            x1 = int(bbox.xmin * w)
-            y1 = int(bbox.ymin * h)
-            x2 = x1 + int(bbox.width * w)
-            y2 = y1 + int(bbox.height * h)
-            
-            face_center_x = (x1 + x2) / 2 / w
-            face_center_y = (y1 + y2) / 2 / h
-            
-            results["faceBoundingBox"] = {
-                "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                "center_x": face_center_x,
-                "center_y": face_center_y
-            }
-            
-            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            # ✅ ENHANCED FACE MESH - ONLY IF FACE DETECTION ENABLED
-            mesh_results = face_mesh.process(rgb_img)
-            if mesh_results.multi_face_landmarks:
-                landmarks = mesh_results.multi_face_landmarks[0]
-                results["eyeDetected"] = True
-                
-                # ✅ ONLY DO GAZE DETECTION IF ENABLED
-                if detection_settings.get('gazeDetection', True):
-                    try:
-                        gaze_direction, eyes_open, is_blinking, gaze_confidence = get_gaze_direction_enhanced(landmarks, w, h)
-                        results["gaze"] = gaze_direction
-                        results["eyesOpen"] = eyes_open
-                        results["blinking"] = is_blinking
-                        results["gazeForward"] = (gaze_direction == "forward")
-                        results["enhancedFeatures"]["gazeConfidence"] = abs(gaze_confidence)
-                        
-                        # Enhanced gaze monitoring - ONLY IF ENABLED
-                        if gaze_direction != "forward" and abs(gaze_confidence) > 0.03:
-                            alert_msg = f"👀 GAZE DEVIATION: {gaze_direction} (confidence: {abs(gaze_confidence):.3f})"
-                            results["suspiciousActivities"].append(alert_msg)
-                            
-                            # Send to teacher
-                            if exam_id and student_socket_id and any(direction in gaze_direction for direction in ["left", "right"]) and abs(gaze_confidence) > 0.05:
-                                send_detection_to_teacher(exam_id, student_socket_id, {
-                                    "message": alert_msg,
-                                    "type": "warning",
-                                    "severity": "medium",
-                                    "detectionType": "gaze_deviation",
-                                    "confidence": abs(gaze_confidence)
-                                })
-                    except Exception as e:
-                        print(f"❌ Gaze detection error: {e}")
-                else:
-                    print("🛑 Gaze detection disabled")
-                    results["gaze"] = "disabled"
-
-                # ✅ ONLY DO HEAD POSE DETECTION IF ENABLED
-                if detection_settings.get('gazeDetection', True):
-                    try:
-                        head_pose, head_pose_confidence = detect_head_pose_enhanced(landmarks, w, h)
-                        results["headPose"] = head_pose
-                        results["enhancedFeatures"]["headPoseConfidence"] = head_pose_confidence
-                        
-                        if head_pose != "head forward" and head_pose_confidence > 0.5:
-                            alert_msg = f"🙄 HEAD POSE: {head_pose} (confidence: {head_pose_confidence:.1%})"
-                            results["suspiciousActivities"].append(alert_msg)
-                            
-                            if exam_id and student_socket_id and head_pose_confidence > 0.6:
-                                send_detection_to_teacher(exam_id, student_socket_id, {
-                                    "message": alert_msg,
-                                    "type": "warning", 
-                                    "severity": "medium",
-                                    "detectionType": "head_pose",
-                                    "confidence": head_pose_confidence
-                                })
-                    except Exception as e:
-                        print(f"❌ Head pose detection error: {e}")
-                else:
-                    print("🛑 Head pose detection disabled")
-                    results["headPose"] = "disabled"
-
-                # ✅ ONLY DO MOUTH MOVEMENT DETECTION IF ENABLED
-                if detection_settings.get('mouthDetection', True):
-                    try:
-                        is_talking, mouth_openness, mouth_confidence = detect_mouth_movement_enhanced(landmarks)
-                        results["mouthMoving"] = is_talking
-                        results["enhancedFeatures"]["mouthMovementConfidence"] = mouth_confidence / 4.0
-                        
-                        if is_talking and mouth_confidence >= 2:
-                            alert_msg = f"🗣️ MOUTH MOVEMENT: Possible talking (confidence: {mouth_confidence}/4)"
-                            results["suspiciousActivities"].append(alert_msg)
-                            
-                            if exam_id and student_socket_id and mouth_confidence >= 3:
-                                send_detection_to_teacher(exam_id, student_socket_id, {
-                                    "message": alert_msg,
-                                    "type": "warning",
-                                    "severity": "medium",
-                                    "detectionType": "mouth_movement",
-                                    "confidence": mouth_confidence / 4.0
-                                })
-                    except Exception as e:
-                        print(f"❌ Mouth detection error: {e}")
-                else:
-                    print("🛑 Mouth detection disabled")
-                    results["mouthMoving"] = False
-
-            # ✅ ONLY DO MULTIPLE PEOPLE DETECTION IF ENABLED
-            if detection_settings.get('multiplePeopleDetection', True):
-                try:
-                    multiple_people, multiple_confidence = detect_multiple_people_enhanced(face_results, img, w, h)
-                    results["multiplePeople"] = multiple_people
-                    results["enhancedFeatures"]["multiplePeopleConfidence"] = multiple_confidence
-                    
-                    if multiple_people and multiple_confidence > 0.5:
-                        alert_msg = f"👥 MULTIPLE PEOPLE DETECTED ({results['faceCount']} faces, confidence: {multiple_confidence:.1%})"
-                        results["suspiciousActivities"].append(alert_msg)
-                        
-                        if exam_id and student_socket_id and multiple_confidence > 0.6:
-                            send_detection_to_teacher(exam_id, student_socket_id, {
-                                "message": f"👥 Multiple people detected ({results['faceCount']} faces)",
-                                "type": "danger",
-                                "severity": "high",
-                                "detectionType": "multiple_people",
-                                "confidence": multiple_confidence
-                            })
-                except Exception as e:
-                    print(f"❌ Multiple people detection error: {e}")
-            else:
-                print("🛑 Multiple people detection disabled")
-
-            # ✅ ONLY DO HAND DETECTION FOR PHONE/MOUSE IF ENABLED
-            if detection_settings.get('phoneDetection', True):
-                try:
-                    hand_results = hand_detector.process(rgb_img)
-                    pose_results = pose_detector.process(rgb_img)
-                    
-                    # Phone detection
-                    phone_detected, phone_confidence = detect_phone_usage_enhanced(hand_results, face_center_x, face_center_y, w, h)
-                    results["phoneDetected"] = phone_detected
-                    results["enhancedFeatures"]["phoneConfidence"] = phone_confidence
-                    
-                    if phone_detected and phone_confidence > 0.5:
-                        alert_msg = f"📱 POTENTIAL PHONE USAGE (confidence: {phone_confidence:.1%})"
-                        results["suspiciousActivities"].append(alert_msg)
-                        
-                        if exam_id and student_socket_id and phone_confidence > 0.6:
-                            send_detection_to_teacher(exam_id, student_socket_id, {
-                                "message": "📱 Potential phone usage detected",
-                                "type": "danger",
-                                "severity": "high", 
-                                "detectionType": "phone_usage",
-                                "confidence": phone_confidence
-                            })
-                    
-                    # Mouse detection
-                    mouse_detected, mouse_confidence = detect_mouse_usage_enhanced(hand_results, pose_results, w, h)
-                    results["mouseDetected"] = mouse_detected
-                    results["enhancedFeatures"]["mouseConfidence"] = mouse_confidence
-                    
-                    if mouse_detected and mouse_confidence > 0.6:
-                        alert_msg = f"🖱️ POTENTIAL MOUSE USAGE (confidence: {mouse_confidence:.1%})"
-                        results["suspiciousActivities"].append(alert_msg)
-                        
-                        if exam_id and student_socket_id and mouse_confidence > 0.7:
-                            send_detection_to_teacher(exam_id, student_socket_id, {
-                                "message": "🖱️ Potential unauthorized device usage detected",
-                                "type": "warning",
-                                "severity": "medium", 
-                                "detectionType": "mouse_usage",
-                                "confidence": mouse_confidence
-                            })
-                except Exception as e:
-                    print(f"❌ Hand detection error: {e}")
-            else:
-                print("🛑 Phone detection disabled")
-                results["phoneDetected"] = False
-                results["mouseDetected"] = False
-
-        else:
-            # Only show no face alert if face detection is enabled
-            if detection_settings.get('faceDetection', True):
-                alert_msg = "❌ NO FACE: Face not visible in camera"
-                results["suspiciousActivities"].append(alert_msg)
-                
-                if exam_id and student_socket_id:
-                    send_detection_to_teacher(exam_id, student_socket_id, {
-                        "message": "❌ Face not visible - Please adjust camera position",
-                        "type": "warning",
-                        "severity": "high",
-                        "detectionType": "no_face"
-                    })
-
-        # ✅ ENHANCED attention score calculation
-        violation_count = len(results["suspiciousActivities"])
-        confidence_penalty = min(50, violation_count * 10)  # Cap at 50% penalty
-        
-        results["attentionScore"] = max(0, 100 - confidence_penalty)
-        results["detectionConfidence"] = calculate_overall_confidence(results)
-        
-        # Only send low attention alert if relevant detections are enabled
-        if exam_id and student_socket_id and results["attentionScore"] < 70 and violation_count > 0:
-            send_detection_to_teacher(exam_id, student_socket_id, {
-                "message": f"📉 Low attention score: {results['attentionScore']}% - High distraction level",
-                "type": "danger",
-                "severity": "high",
-                "detectionType": "low_attention",
-                "confidence": results["detectionConfidence"]
-            })
-
-        results["processingTime"] = round((time.time() - start_time) * 1000, 2)
-
-        print(f"✅ Detection completed - Alerts: {len(results['suspiciousActivities'])}")
-        return jsonify(results)
-
-    except Exception as e:
-        print(f"❌ Detection error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e), "message": "Internal server error occurred"}), 500
-        
-        print(f"🎯 Received detection settings: {detection_settings}")
-        
-        # ✅ CHECK IF ALL DETECTIONS ARE DISABLED - RETURN EARLY
-        if detection_settings and not any([
-            detection_settings.get('faceDetection', True),
-            detection_settings.get('gazeDetection', True), 
-            detection_settings.get('phoneDetection', True),
-            detection_settings.get('mouthDetection', True),
-            detection_settings.get('multiplePeopleDetection', True),
-            detection_settings.get('audioDetection', True)
-        ]):
-            print("🛑 ALL DETECTIONS DISABLED - Returning minimal response")
-            return jsonify({
-                "faceDetected": False,
-                "faceCount": 0,
-                "gaze": "unknown",
-                "eyesOpen": True,
-                "headPose": "unknown",
-                "phoneDetected": False,
-                "mouseDetected": False,
-                "mouthMoving": False,
-                "multiplePeople": False,
-                "blinking": False,
-                "suspiciousActivities": [],
-                "attentionScore": 100,
-                "detectionConfidence": 0.0,
-                "processingTime": round((time.time() - start_time) * 1000, 2),
-                "message": "All detections disabled by teacher settings"
-            })
-            
         img = decode_image(data['image'])
         if img is None:
             return jsonify({"error": "Invalid image"}), 400
@@ -1111,6 +1294,8 @@ def detect():
             "mouseDetected": False,
             "mouthMoving": False,
             "multiplePeople": False,
+            "screenshotDetected": False,
+            "screenshotViolations": [],
             "faceOccluded": False,
             "blinking": False,
             "suspiciousActivities": [],
@@ -1127,9 +1312,49 @@ def detect():
                 "phoneConfidence": 0.0,
                 "mouseConfidence": 0.0,
                 "multiplePeopleConfidence": 0.0,
-                "mouthMovementConfidence": 0.0
+                "mouthMovementConfidence": 0.0,
+                "audioConfidence": 0.0,
+                "handGestureConfidence": 0.0,
+                "screenshotConfidence": 0.0
             }
         }
+
+        # ==================== SCREENSHOT DETECTION ====================
+        results["screenshotDetected"] = False
+        results["screenshotViolations"] = []
+        print("🛑 Screenshot detection disabled globally")
+
+        # ✅ CHECK IF ALL DETECTIONS ARE DISABLED - RETURN EARLY
+        if detection_settings and not any([
+            detection_settings.get('faceDetection', True),
+            detection_settings.get('gazeDetection', True), 
+            detection_settings.get('phoneDetection', True),
+            detection_settings.get('mouthDetection', True),
+            detection_settings.get('multiplePeopleDetection', True),
+            detection_settings.get('audioDetection', True),
+            detection_settings.get('handGestureDetection', True),
+            detection_settings.get('screenshotDetection', True)
+        ]):
+            print("🛑 ALL DETECTIONS DISABLED - Returning minimal response")
+            return jsonify({
+                "faceDetected": False,
+                "faceCount": 0,
+                "gaze": "unknown",
+                "eyesOpen": True,
+                "headPose": "unknown",
+                "phoneDetected": False,
+                "mouseDetected": False,
+                "mouthMoving": False,
+                "multiplePeople": False,
+                "screenshotDetected": results["screenshotDetected"],
+                "screenshotViolations": results["screenshotViolations"],
+                "blinking": False,
+                "suspiciousActivities": results["suspiciousActivities"],
+                "attentionScore": 100,
+                "detectionConfidence": 0.0,
+                "processingTime": round((time.time() - start_time) * 1000, 2),
+                "message": "All detections disabled by teacher settings"
+            })
 
         # ✅ ONLY PROCESS FACE DETECTION IF ENABLED
         face_results = None
@@ -1167,6 +1392,8 @@ def detect():
                             "type": "danger",
                             "severity": "high",
                             "timestamp": datetime.now().isoformat(),
+                            "studentSocketId": student_socket_id,
+                            "detectionType": "multiple_people",
                             "confidence": multiple_confidence
                         })
             else:
@@ -1217,6 +1444,8 @@ def detect():
                                 "type": "warning",
                                 "severity": "medium",
                                 "timestamp": datetime.now().isoformat(),
+                                "studentSocketId": student_socket_id,
+                                "detectionType": "gaze_deviation",
                                 "confidence": abs(gaze_confidence)
                             })
                 else:
@@ -1240,6 +1469,8 @@ def detect():
                                 "type": "warning", 
                                 "severity": "medium",
                                 "timestamp": datetime.now().isoformat(),
+                                "studentSocketId": student_socket_id,
+                                "detectionType": "head_pose_deviation",
                                 "confidence": head_pose_confidence
                             })
                 else:
@@ -1261,6 +1492,8 @@ def detect():
                                 "type": "warning",
                                 "severity": "medium",
                                 "timestamp": datetime.now().isoformat(),
+                                "studentSocketId": student_socket_id,
+                                "detectionType": "mouth_movement",
                                 "confidence": mouth_confidence / 4.0
                             })
                 else:
@@ -1268,63 +1501,110 @@ def detect():
                     results["mouthMoving"] = False
 
             # ✅ ONLY DO HAND DETECTION FOR PHONE/MOUSE IF ENABLED
-            if detection_settings.get('phoneDetection', True):
+            hand_results = None
+            if detection_settings.get('phoneDetection', True) or detection_settings.get('handGestureDetection', True):
                 hand_results = hand_detector.process(rgb_img)
                 pose_results = pose_detector.process(rgb_img)
                 
-                # ✅ ONLY DO PHONE DETECTION IF ENABLED
-                phone_detected, phone_confidence = detect_phone_usage_enhanced(hand_results, face_center_x, face_center_y, w, h)
-                results["phoneDetected"] = phone_detected
-                results["enhancedFeatures"]["phoneConfidence"] = phone_confidence
                 
-                if phone_detected and phone_confidence > 0.5:
-                    results["suspiciousActivities"].append(f"📱 POTENTIAL PHONE USAGE (confidence: {phone_confidence:.1%})")
-                    
-                    if exam_id and phone_confidence > 0.6:
-                        send_proctoring_alert(exam_id, {
-                            "message": "📱 Potential phone usage detected",
-                            "type": "danger",
-                            "severity": "high", 
-                            "timestamp": datetime.now().isoformat(),
-                            "confidence": phone_confidence
-                        })
-            else:
-                print("🛑 Phone detection disabled")
-                results["phoneDetected"] = False
 
-            # ✅ ONLY DO MOUSE DETECTION IF ENABLED (usually tied to phone detection)
-            if detection_settings.get('phoneDetection', True):
-                mouse_detected, mouse_confidence = detect_mouse_usage_enhanced(hand_results, pose_results, w, h)
-                results["mouseDetected"] = mouse_detected
-                results["enhancedFeatures"]["mouseConfidence"] = mouse_confidence
-                
-                if mouse_detected and mouse_confidence > 0.6:
-                    results["suspiciousActivities"].append(f"🖱️ POTENTIAL MOUSE USAGE (confidence: {mouse_confidence:.1%})")
+                # ✅ ONLY DO MOUSE DETECTION IF ENABLED (usually tied to phone detection)
+                if detection_settings.get('phoneDetection', True):
+                    mouse_detected, mouse_confidence = detect_mouse_usage_enhanced(hand_results, pose_results, w, h)
+                    results["mouseDetected"] = mouse_detected
+                    results["enhancedFeatures"]["mouseConfidence"] = mouse_confidence
                     
-                    if exam_id and mouse_confidence > 0.7:
-                        send_proctoring_alert(exam_id, {
-                            "message": "🖱️ Potential unauthorized device usage detected",
-                            "type": "warning",
-                            "severity": "medium", 
-                            "timestamp": datetime.now().isoformat(),
-                            "confidence": mouse_confidence
-                        })
-            else:
-                print("🛑 Mouse detection disabled")
-                results["mouseDetected"] = False
+                    if mouse_detected and mouse_confidence > 0.6:
+                        results["suspiciousActivities"].append(f"🖱️ POTENTIAL MOUSE USAGE (confidence: {mouse_confidence:.1%})")
+                        
+                        if exam_id and mouse_confidence > 0.7:
+                            send_proctoring_alert(exam_id, {
+                                "message": "🖱️ Potential unauthorized device usage detected",
+                                "type": "warning",
+                                "severity": "medium", 
+                                "timestamp": datetime.now().isoformat(),
+                                "studentSocketId": student_socket_id,
+                                "detectionType": "mouse_usage",
+                                "confidence": mouse_confidence
+                            })
+                else:
+                    print("🛑 Mouse detection disabled")
+                    results["mouseDetected"] = False
+
+                # ✅ HAND GESTURE DETECTION
+                if detection_settings.get('handGestureDetection', True) and hand_results and hand_results.multi_hand_landmarks:
+                    hand_violations, hand_confidence = detect_suspicious_gestures(
+                        hand_results.multi_hand_landmarks, 
+                        face_center_x, 
+                        face_center_y
+                    )
+                    
+                    for violation in hand_violations:
+                        if hand_confidence > 0.5:
+                            results["suspiciousActivities"].append(f"🤚 GESTURE: {violation} (confidence: {hand_confidence:.1%})")
+                            results["enhancedFeatures"]["handGestureConfidence"] = hand_confidence
+                            
+                            if exam_id and hand_confidence > 0.6:
+                                send_proctoring_alert(exam_id, {
+                                    "message": f"🤚 {violation.replace('_', ' ').title()}",
+                                    "type": "warning",
+                                    "severity": "medium",
+                                    "timestamp": datetime.now().isoformat(),
+                                    "studentSocketId": student_socket_id,
+                                    "detectionType": "suspicious_gesture",
+                                    "confidence": hand_confidence
+                                })
 
         else:
-            # Only show no face alert if face detection is enabled
+            # Only show no face alert if face detection is enabled AND no face detected in multiple frames
             if detection_settings.get('faceDetection', True):
-                results["suspiciousActivities"].append("❌ NO FACE: Face not visible in camera")
+                # Check detection history to avoid false positives
+                current_time = datetime.now()
+                recent_no_face_count = sum(1 for detection in list(detection_history)[-5:] 
+                                          if not detection.get('faceDetected', False))
+        
+                if recent_no_face_count >= 3:  # Only alert if no face for 3 consecutive frames
+                    results["suspiciousActivities"].append("❌ NO FACE: Face not visible in camera")
+            
+                    if exam_id:
+                        send_proctoring_alert(exam_id, {
+                            "message": "❌ Face not visible - Please adjust camera position",
+                            "type": "warning",
+                            "severity": "high",
+                            "timestamp": datetime.now().isoformat(),
+                            "studentSocketId": student_socket_id,
+                            "detectionType": "no_face_detected"
+                        })
+        
+            # Store current detection in history
+            detection_history.append({
+                'timestamp': current_time,
+                'faceDetected': False,
+                'faceCount': 0
+            })
+
+        # ✅ AUDIO DETECTION
+        if detection_settings.get('audioDetection', True):
+            # Process audio if available
+            audio_data = data.get('audio_data')
+            if audio_data:
+                audio_violations, audio_confidence = detect_audio_violations(audio_data)
+                results["enhancedFeatures"]["audioConfidence"] = audio_confidence
                 
-                if exam_id:
-                    send_proctoring_alert(exam_id, {
-                        "message": "❌ Face not visible - Please adjust camera position",
-                        "type": "warning",
-                        "severity": "high",
-                        "timestamp": datetime.now().isoformat()
-                    })
+                for violation in audio_violations:
+                    if audio_confidence > 0.5:
+                        results["suspiciousActivities"].append(f"🎤 AUDIO: {violation} (confidence: {audio_confidence:.1%})")
+                        
+                        if exam_id and audio_confidence > 0.6:
+                            send_proctoring_alert(exam_id, {
+                                "message": f"🎤 {violation.replace('_', ' ').title()}",
+                                "type": "warning",
+                                "severity": "medium",
+                                "timestamp": datetime.now().isoformat(),
+                                "studentSocketId": student_socket_id,
+                                "detectionType": "audio_detection",
+                                "confidence": audio_confidence
+                            })
 
         # ✅ ENHANCED attention score calculation - ONLY COUNT ENABLED DETECTIONS
         violation_count = len(results["suspiciousActivities"])
@@ -1355,20 +1635,22 @@ def detect():
         if exam_id and results["attentionScore"] < 70 and any([
             detection_settings.get('gazeDetection', True),
             detection_settings.get('phoneDetection', True),
-            detection_settings.get('multiplePeopleDetection', True)
+            detection_settings.get('multiplePeopleDetection', True),
         ]):
             send_proctoring_alert(exam_id, {
                 "message": f"📉 Low attention score: {results['attentionScore']}% - High distraction level",
                 "type": "danger",
                 "severity": "high",
                 "timestamp": datetime.now().isoformat(),
+                "studentSocketId": student_socket_id,
+                "detectionType": "low_attention_score",
                 "confidence": results["detectionConfidence"]
             })
 
         # Enhanced debug image with settings information
         try:
-            settings_status = f"Settings: Face:{detection_settings.get('faceDetection',True)} Gaze:{detection_settings.get('gazeDetection',True)}"
-            status_text = f"Faces: {results['faceCount']} | Gaze: {results['gaze']} | Head: {results['headPose']}"
+            settings_status = f"Settings: Face:{detection_settings.get('faceDetection',True)} Gaze:{detection_settings.get('gazeDetection',True)} Screenshot:{detection_settings.get('screenshotDetection',True)}"
+            status_text = f"Faces: {results['faceCount']} | Gaze: {results['gaze']} | Screenshot: {results['screenshotDetected']}"
             confidence_text = f"Overall Confidence: {results['detectionConfidence']:.1%}"
             score_text = f"Attention: {results['attentionScore']}% | Alerts: {violation_count}"
             
@@ -1389,7 +1671,7 @@ def detect():
             
             if results["suspiciousActivities"]:
                 for i, activity in enumerate(results["suspiciousActivities"][:3]):
-                    color = (0, 0, 255) if any(keyword in activity for keyword in ["PHONE", "MULTIPLE", "LOW ATTENTION"]) else (0, 165, 255)
+                    color = (0, 0, 255) if any(keyword in activity for keyword in ["PHONE", "MULTIPLE", "LOW ATTENTION", "SCREENSHOT"]) else (0, 165, 255)
                     cv2.putText(img, f"• {activity}", (10, y_offset + i*25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
             _, buffer = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -1401,7 +1683,7 @@ def detect():
         # Calculate processing time
         results["processingTime"] = round((time.time() - start_time) * 1000, 2)
 
-        print(f"✅ Detection completed - Settings: {detection_settings}, Alerts: {len(results['suspiciousActivities'])}")
+        print(f"✅ Detection completed for student {student_socket_id} - Screenshot: {results['screenshotDetected']}, Alerts: {len(results['suspiciousActivities'])}")
         return jsonify(results)
 
     except Exception as e:
@@ -1434,23 +1716,178 @@ def calculate_overall_confidence(results):
         print(f"Confidence calculation error: {e}")
         return 0.5
 
+# ILAGAY BEFORE NG @app.route('/health')
+
+
+
+@app.route('/tab-switches/<exam_id>', methods=['GET'])
+def get_all_tab_switches(exam_id):
+    """Get tab switch statistics for all students in exam"""
+    try:
+        exam_switches = {}
+        for key in tab_switch_tracker.keys():
+            if exam_id in key:
+                student_socket_id = key.split('_')[-1]
+                tracker = tab_switch_tracker[key]
+                exam_switches[student_socket_id] = {
+                    "total_switches": tracker['count'],
+                    "last_switch_time": tracker['last_switch_time'],
+                    "recent_count": len([h for h in tracker['history'] if is_recent(h.get('timestamp'))])
+                }
+        
+        return jsonify({
+            "exam_id": exam_id,
+            "total_students_with_switches": len(exam_switches),
+            "switches_by_student": exam_switches,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ✅ DAGDAG MO ITO - INDIVIDUAL STUDENT ENDPOINT
+@app.route('/tab-switches/<exam_id>/<student_socket_id>', methods=['GET'])
+def get_tab_switches(exam_id, student_socket_id):
+    """Get tab switch statistics for a specific student"""
+    try:
+        key = f"{exam_id}_{student_socket_id}"
+        tracker = tab_switch_tracker.get(key, {
+            'count': 0,
+            'last_switch_time': None,
+            'history': []
+        })
+        
+        return jsonify({
+            "exam_id": exam_id,
+            "student_socket_id": student_socket_id,
+            "total_switches": tracker['count'],
+            "last_switch_time": tracker['last_switch_time'],
+            "recent_history": tracker['history'][-10:],
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def is_recent(timestamp_str, minutes=5):
+    """Check if timestamp is within the last specified minutes"""
+    try:
+        if not timestamp_str:
+            return False
+        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        return (datetime.now() - timestamp).total_seconds() < minutes * 60
+    except:
+        return False
+        
+def is_recent_24h(timestamp_str):
+    """Check if timestamp is within the last 24 hours"""
+    try:
+        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        return (datetime.now() - timestamp).total_seconds() < 24 * 3600
+    except:
+        return False
+
+def get_most_common_violation(violations):
+    """Get the most common violation type"""
+    if not violations:
+        return "none"
+    
+    violation_types = []
+    for violation in violations:
+        violation_types.extend(violation.get('violations', []))
+    
+    if not violation_types:
+        return "none"
+    
+    from collections import Counter
+    return Counter(violation_types).most_common(1)[0][0]
+
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({
         "status": "healthy", 
         "timestamp": datetime.now().isoformat(),
-        "version": "enhanced-proctoring-with-settings",
+        "version": "enhanced-proctoring-with-screenshot-detection",
         "connected_clients": len(connected_clients),
+        "screenshot_detection_enabled": screenshot_detection_enabled,
         "features": [
+            "Screenshot tool detection",
+            "Screen capture artifact detection", 
+            "Multiple monitor detection",
+            "Text analysis for screenshot-related content",
             "Respects teacher detection settings",
             "Configurable face detection",
             "Configurable gaze detection", 
             "Configurable phone detection",
             "Configurable mouth detection",
-            "Configurable multiple people detection"
+            "Configurable multiple people detection",
+            "Configurable audio detection",
+            "Configurable hand gesture detection",
+            "Configurable tab switching detection"
         ]
     })
 
+# In server.py, add this endpoint
+@app.route('/update_attempts', methods=['POST'])
+def update_attempts():
+    try:
+        data = request.json
+        exam_id = data.get('exam_id')
+        student_socket_id = data.get('student_socket_id')
+        detection_type = data.get('detection_type')
+        message = data.get('message', 'Violation detected')
+        
+        if not exam_id or not student_socket_id:
+            return jsonify({"error": "Missing parameters"}), 400
+        
+        key = f"{exam_id}_{student_socket_id}"
+        
+        # Get current attempts
+        attempts = student_attempts.get(key, {
+            'current_attempts': 0,
+            'max_attempts': 10,
+            'attempts_left': 10,
+            'violation_history': []
+        })
+        
+        # Deduct attempt
+        attempts['current_attempts'] += 1
+        attempts['attempts_left'] = max(0, attempts['max_attempts'] - attempts['current_attempts'])
+        
+        # Add to history
+        attempts['violation_history'].append({
+            'timestamp': datetime.now().isoformat(),
+            'type': detection_type,
+            'message': message,
+            'attempts_used': attempts['current_attempts'],
+            'attempts_left': attempts['attempts_left']
+        })
+        
+        student_attempts[key] = attempts
+        
+        # Send to teacher
+        room = f"exam-{exam_id}"
+        sio.emit('student-attempts-update', {
+            'studentSocketId': student_socket_id,
+            'attempts': attempts,
+            'detectionType': detection_type,
+            'message': message
+        }, room=room)
+        
+        # Send to student
+        sio.emit('attempts-update', {
+            'studentSocketId': student_socket_id,
+            'attempts': attempts,
+            'detectionType': detection_type
+        }, room=student_socket_id)
+        
+        return jsonify({
+            "status": "success",
+            "attempts": attempts,
+            "message": f"Attempt deducted. {attempts['attempts_left']} attempts remaining."
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+        
 @app.route('/test', methods=['GET'])
 def test_endpoint():
     return jsonify({
@@ -1461,6 +1898,8 @@ def test_endpoint():
             "Improved head pose analysis with symmetry checks",
             "Advanced phone detection with multiple factors",
             "Enhanced mouth movement detection",
+            "Enhanced audio detection with spectral analysis",
+            "Hand gesture detection for suspicious movements",
             "Confidence-based alert system",
             "Image quality enhancement"
         ]
@@ -1473,9 +1912,11 @@ if __name__ == "__main__":
     print("   • Enhanced head pose analysis with symmetry checks")
     print("   • Advanced phone detection with multiple confidence factors")
     print("   • Better mouth movement detection with multiple metrics")
+    print("   • Enhanced audio detection with spectral analysis")
+    print("   • Hand gesture detection for suspicious movements")
     print("   • Confidence-based alert system")
     print("   • Image quality enhancement for better detection")
     print("   • Multiple people detection with position analysis")
-    print("   • Enhanced audio analysis with spectral features")
+    print("   • ALL DETECTION TYPES DEDUCT ATTEMPTS AUTOMATICALLY")
     print("🌐 Access the server at: http://localhost:5000")
     eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5000)), app_socket)

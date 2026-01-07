@@ -17,15 +17,17 @@
   justify-content: space-between;
   align-items: center;
   padding: 12px 24px;
-  background: rgb(190, 189, 189);
-  border-bottom: 1px solid #e0e0e0;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background: #ea5c1f !important; /* FORCE ORANGE COLOR */
+  background-color: #ea5c1f !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 10px rgba(234, 92, 31, 0.3);
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 1000;
   width: 100%;
   box-sizing: border-box;
-  height: 110px;
+  height: 75px;
+  color: white;
 }
 
 .header-left {
@@ -210,7 +212,7 @@
   flex: 1;
   display: flex;
   min-height: calc(100vh - 70px);
-  background: white;
+  background: #4f5d75;
   width: 100vw;
   margin: 0;
   padding: 0;
@@ -268,7 +270,7 @@
     text-decoration: none;
     box-sizing: border-box;
     position: relative;
-    min-height: 100%; 
+    min-height: 100%;
 }
 
 .sidebar-item:hover {
@@ -484,13 +486,7 @@
     color: #137333;
 }
 
-/* Separators */
-.sidebar-separator {
-    height: 1px;
-    background: #e8eaed;
-    margin: 8px 0;
-    border: none;
-}
+
 
 /* Scrollbar Styling */
 .class-list-section::-webkit-scrollbar {
@@ -552,7 +548,7 @@
   flex: 1;
   padding: 30px;
   overflow-y: auto;
-  background: white;
+  background: #eae6e0;
   width: 100%;
   box-sizing: border-box;
   margin: 0;
@@ -1230,130 +1226,6 @@ body, html {
 }
 
 /* ===== IMPROVED FONTS & TYPOGRAPHY ===== */
-.people-tab {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-}
-
-.people-header h3 {
-  color: #202124;
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin-bottom: 24px;
-  font-family: 'Google Sans', 'Segoe UI', Roboto, sans-serif;
-}
-
-.members-section {
-  margin-bottom: 32px;
-}
-
-.section-title {
-  color: #5f6368;
-  font-size: 1rem;
-  font-weight: 500;
-  margin-bottom: 16px;
-  font-family: 'Google Sans', 'Segoe UI', Roboto, sans-serif;
-  border-bottom: 1px solid #e8eaed;
-  padding-bottom: 8px;
-}
-
-.members-simple-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.member-simple-item {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px 20px;
-  background: white;
-  border: 1px solid #dadce0;
-  border-radius: 12px;
-  transition: all 0.2s ease;
-  font-family: 'Segoe UI', Roboto, sans-serif;
-}
-
-.member-simple-item:hover {
-  background: #f8f9fa;
-  border-color: #4285f4;
-  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.1);
-  transform: translateY(-1px);
-}
-
-.teacher-item {
-  border-left: 4px solid #34a853;
-  background: linear-gradient(135deg, #f8fff9 0%, #ffffff 100%);
-}
-
-.student-item {
-  border-left: 4px solid #4285f4;
-  background: linear-gradient(135deg, #f8fbff 0%, #ffffff 100%);
-}
-
-.member-simple-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  overflow: hidden;
-  flex-shrink: 0;
-  border: 2px solid #e8eaed;
-}
-
-.member-simple-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.member-simple-info {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.member-simple-name {
-  color: #202124;
-  font-weight: 500;
-  font-size: 15px;
-  font-family: 'Google Sans', 'Segoe UI', Roboto, sans-serif;
-}
-
-.you-tag {
-  background: linear-gradient(135deg, #4285f4, #34a853);
-  color: white;
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 10px;
-  font-weight: 600;
-  font-family: 'Google Sans', Roboto, sans-serif;
-}
-
-.member-simple-role {
-  color: #5f6368;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 6px 12px;
-  border-radius: 14px;
-  background: #f8f9fa;
-  font-family: 'Google Sans', Roboto, sans-serif;
-  border: 1px solid #e8eaed;
-}
-
-.teacher-item .member-simple-role {
-  background: linear-gradient(135deg, #e6f4ea, #ceead6);
-  color: #137333;
-  border-color: #34a853;
-  font-weight: 600;
-}
-
-.student-item .member-simple-role {
-  background: linear-gradient(135deg, #e8f0fe, #d2e3fc);
-  color: #1558d6;
-  border-color: #4285f4;
-  font-weight: 600;
-}
 
 /* Empty State Styling */
 .empty-members {
@@ -1399,10 +1271,6 @@ body, html {
   
   .member-simple-name {
     font-size: 14px;
-  }
-  
-  .people-header h3 {
-    font-size: 1.3rem;
   }
 }
 
@@ -3139,11 +3007,7 @@ a:focus {
   border: 1px solid #ceead6;
 }
 
-.sidebar-separator {
-  border: none;
-  border-top: 1px solid #e0e0e0;
-  margin: 0.5rem 0;
-}
+
 /* Dropdown ENROLLED Section Styles */
 .dropdown-header {
   display: flex;
@@ -3562,7 +3426,11 @@ a:focus {
   margin-bottom: 8px;
 }
 
-
+.todo-subtitle {
+  font-size: 14px;
+  color: #5f6368;
+  margin: 0;
+}
 
 .todo-section {
   margin-bottom: 32px;
@@ -4871,12 +4739,20 @@ a:focus {
 }
 
 
+.teacher-indicator,
+.student-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 .teacher-indicator {
   color: #34a853;
 }
 
-
+.student-indicator {
+  color: #4285f4;
+}
 /* Delete All Quizzes Styles */
 .delete-all-quizzes-btn {
   background: #dc3545;
@@ -4934,7 +4810,11 @@ a:focus {
   flex-wrap: wrap;
 }
 
-
+.student-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 
 @keyframes spin {
   0% { transform: rotate(0deg); }
@@ -6456,6 +6336,11 @@ a:focus {
   font-size: 14px;
 }
 
+/* Role Indicator */
+.role-indicator {
+  padding: 12px 0;
+  border-top: 1px solid #e8eaed;
+}
 
 .teacher-indicator, .student-indicator {
   display: flex;
@@ -6469,6 +6354,9 @@ a:focus {
   color: #1a73e8;
 }
 
+.student-indicator {
+  color: #34a853;
+}
 
 .delete-all-quizzes-btn {
   margin-left: auto;
@@ -6629,7 +6517,15 @@ a:focus {
   margin-left: 8px;
 }
 
-
+.no-action-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
 
 .info-text {
   font-size: 0.9rem;
@@ -6668,434 +6564,59 @@ a:focus {
   font-weight: bold;
   margin-left: 8px;
 }
-/* Export Buttons */
-.grades-header-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
-}
-
-.export-buttons-container {
+/* ===== FIX SCROLL ISSUE ===== */
+.dashboard-wrapper {
   position: relative;
+  min-height: 100vh;
+  overflow-y: auto;
 }
 
-.export-btn {
-  background: #1a73e8;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: background 0.2s;
-}
-
-.export-btn:hover {
-  background: #0d62d9;
-}
-
-.export-dropdown {
-  position: relative;
-}
-
-.export-dropdown-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  background: white;
-  border: 1px solid #dadce0;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-  min-width: 180px;
-  z-index: 100;
-  display: none;
-  margin-top: 5px;
-}
-
-.export-dropdown:hover .export-dropdown-menu {
-  display: block;
-}
-
-.export-option {
-  width: 100%;
-  text-align: left;
-  padding: 12px 16px;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 14px;
-  color: #3c4043;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.export-option:hover {
-  background: #f8f9fa;
-}
-/* Export Button Styles */
-.export-grades-btn {
-  background-color: #34a853;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.2s ease;
-  margin-left: auto;
-}
-
-.export-grades-btn:hover {
-  background-color: #2d9249;
-  transform: translateY(-1px);
-}
-
-.export-grades-btn:active {
-  transform: translateY(0);
-}
-
-.export-icon {
-  width: 16px;
-  height: 16px;
-}
-
-/* Gradebook Toolbar Update */
-.gradebook-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
-  padding: 12px 0;
-  border-bottom: 1px solid #e0e0e0;
-}
-
-.gradebook-sort {
-  position: relative;
-}
-
-.sort-by-btn {
-  background: white;
-  border: 1px solid #dadce0;
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 14px;
-  cursor: pointer;
-  color: #5f6368;
-}
-
-.sort-by-btn:hover {
-  background: #f8f9fa;
-}
-
-.sort-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  background: white;
-  border: 1px solid #dadce0;
-  border-radius: 4px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+.dashboard-header {
+  position: sticky;
+  top: 0;
   z-index: 1000;
-  min-width: 180px;
-  margin-top: 4px;
-}
-
-.sort-menu-item {
-  display: block;
   width: 100%;
-  padding: 8px 16px;
-  text-align: left;
-  background: none;
-  border: none;
-  font-size: 14px;
-  color: #5f6368;
-  cursor: pointer;
+  background: var(--midnight);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
-.sort-menu-item:hover {
-  background: #f8f9fa;
+/* Ensure content doesn't go under fixed header */
+.dashboard-main {
+  margin-top: 0;
+  padding-top: 0;
 }
 
-.gradebook-overall {
-  font-size: 14px;
-  color: #5f6368;
-  background: #f8f9fa;
-  padding: 8px 12px;
-  border-radius: 4px;
-  border: 1px solid #e0e0e0;
-}
-/* ===========================
-   GOOGLE CLASSROOM – GRADES UI
-   =========================== */
-
-/* Grades Container */
-.grades-container {
-  width: 100%;
-  padding: 20px;
-  overflow-x: auto;
+/* Prevent body scrolling issues */
+body, html {
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
 }
 
-/* Grades Table Fix */
-.grades-table-container {
-  overflow-x: auto;
-  margin-top: 20px;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  background: white;
-}
-
-.grades-table-fixed {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 800px;
-}
-
-.grades-th {
-  padding: 12px;
-  background: #f8f9fa;
-  border-right: 1px solid #e0e0e0;
-  border-bottom: 1px solid #e0e0e0;
-  font-weight: 600;
-  text-align: center;
-  vertical-align: middle;
-  min-width: 150px;
-}
-
-.students-th {
-  text-align: left;
-  padding-left: 20px;
-  min-width: 200px;
-  position: sticky;
-  left: 0;
-  background: #f8f9fa;
-  z-index: 10;
-}
-
-.exam-th {
-  text-align: center;
-}
-
-.exam-points {
-  font-size: 12px;
-  font-weight: normal;
-  color: #5f6368;
-  margin-top: 4px;
-}
-
-.grades-td {
-  padding: 12px;
-  border-right: 1px solid #e0e0e0;
-  border-bottom: 1px solid #e0e0e0;
-  vertical-align: middle;
-  height: 60px;
-}
-
-.average-label {
-  background: #f8f9fa;
-  font-weight: 600;
-  position: sticky;
-  left: 0;
-  z-index: 5;
-}
-
-.average-value {
-  text-align: center;
-  font-weight: 500;
-  color: #5f6368;
-  background: #f8f9fa;
-}
-
-.student-info-cell {
-  background: #f8f9fa;
-  position: sticky;
-  left: 0;
-  z-index: 5;
-  min-width: 200px;
-}
-
-.student-info-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.student-avatar {
-  width: 35px;
-  height: 35px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.student-name-email {
-  min-width: 0;
-}
-
-.student-name {
-  font-weight: 500;
-  color: #3c4043;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.student-email {
-  font-size: 12px;
-  color: #5f6368;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.score-cell {
-  text-align: center;
-  background: white;
-}
-
-.student-row:nth-child(even) .score-cell {
-  background: #fafafa;
-}
-
-.student-row:hover .grades-td {
-  background: #f1f3f4 !important;
-}
-
-.student-row:hover .student-info-cell {
-  background: #f1f3f4 !important;
-}
-
-.student-row:hover .average-label {
-  background: #f1f3f4 !important;
-}
-
-.class-average-row {
-  background: #f8f9fa;
-}
-
-.class-average-row:hover .grades-td {
-  background: #f1f3f4 !important;
-}
-
-.grade-missing {
-  color: #d93025;
-  font-style: italic;
-  font-size: 14px;
-}
-
-.grade-score {
-  font-weight: 500;
-  color: #1a73e8;
-  font-size: 14px;
-}
-
-/* Gradebook Toolbar - keep existing */
-.gradebook-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px;
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  margin-bottom: 20px;
-}
-
-.gradebook-sort {
+/* Ensure main content area scrolls properly */
+.main-content {
   position: relative;
+  z-index: 1;
+  overflow-y: auto;
+  height: calc(100vh - 70px); /* Adjust based on header height */
 }
-
-.sort-by-btn {
-  padding: 8px 16px;
-  background: white;
-  border: 1px solid #dadce0;
-  border-radius: 4px;
-  font-size: 14px;
-  color: #5f6368;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.sort-by-btn:hover {
-  background: #f8f9fa;
-}
-
-.sort-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 4px;
-  background: white;
-  border: 1px solid #dadce0;
-  border-radius: 4px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-  z-index: 100;
-  min-width: 180px;
-}
-
-.sort-menu-item {
-  width: 100%;
-  padding: 12px 16px;
-  text-align: left;
-  background: none;
-  border: none;
-  font-size: 14px;
-  color: #3c4043;
-  cursor: pointer;
-}
-
-.sort-menu-item:hover {
-  background: #f8f9fa;
-}
-
-.export-grades-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: #1a73e8;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.export-grades-btn:hover {
-  background: #0d62d9;
-}
-
-.export-icon {
-  width: 16px;
-  height: 16px;
-}
-
-.gradebook-overall {
-  font-size: 14px;
-  color: #5f6368;
-}
-
-.gradebook-overall strong {
-  color: #1a73e8;
-  font-size: 16px;
-}
-/* Fix for quiz card menu positioning */
+/* EXAM CARD STYLES - FIXED POSITIONING */
 .exam-card {
-  position: relative;
+  position: relative; /* CRITICAL: This makes absolute children relative to the card */
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  transition: box-shadow 0.2s ease;
 }
 
+.exam-card:hover {
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+/* Fix for the menu positioning */
 .exam-actions-dropdown {
   position: absolute;
   top: 10px;
@@ -7103,85 +6624,51 @@ a:focus {
   z-index: 10;
 }
 
-
-
-.exam-menu-item {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 8px 12px;
-  border: none;
-  background: transparent;
-  text-align: left;
+/* Remove the inline styles from the button */
+.exam-menu-btn {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 4px 8px;
   cursor: pointer;
-  font-size: 14px;
-  color: #374151;
+  transition: all 0.2s ease;
 }
 
-.exam-menu-item:hover {
-  background: #f3f4f6;
+.exam-menu-btn:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
 }
 
-.menu-item-icon {
-  margin-right: 8px;
-  width: 16px;
-}
-
-.exam-menu-item.delete {
-  color: #ef4444;
-}
-/* View Summary Button Styles */
-.action-btn.summary {
-  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
-  color: white;
-  border: none;
-  padding: 8px 16px;
+/* Menu dropdown styling */
+.exam-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  background: white;
+  border: 1px solid #e5e7eb;
   border-radius: 6px;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  min-width: 180px;
+  margin-top: 4px;
 }
 
-.action-btn.summary:hover {
-  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
-}
-
-.action-btn.summary:disabled {
-  background: #9ca3af;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-/* Exam card summary button position */
-.exam-card .exam-action-button {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-/* Violation Summary Menu Item */
 .exam-menu-item {
   display: flex;
   align-items: center;
-  gap: 8px;
   width: 100%;
   padding: 8px 12px;
   text-align: left;
   background: none;
   border: none;
+  font-size: 14px;
   color: #374151;
-  font-size: 0.875rem;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s ease;
 }
 
 .exam-menu-item:hover {
-  background-color: #f3f4f6;
+  background-color: #f9fafb;
 }
 
 .exam-menu-item.delete {
@@ -7189,91 +6676,385 @@ a:focus {
 }
 
 .exam-menu-item.delete:hover {
-  background-color: #fef2f2;
+  background-color: #fee2e2;
 }
 
 .menu-item-icon {
+  margin-right: 8px;
   width: 16px;
   height: 16px;
 }
 
-/* Violation Summary Card Info */
-.exam-card {
-  position: relative;
+/* Card spacing */
+.exam-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 20px;
+}
+/* ===== FIX SIDEBAR BACKGROUND COLOR #4F5D75 ===== */
+.sidebar {
+    background-color: #4F5D75 !important;
+}
+
+/* Update all text in sidebar to be visible */
+.sidebar-item,
+.sidebar-text,
+.section-header,
+.dropdown-header,
+.class-name,
+.class-list-item {
+    color: #ffffff !important;
+}
+
+.class-details {
+    color: #e0e0e0 !important;
+}
+
+/* Update hover states */
+.sidebar-item:hover,
+.dropdown-header:hover,
+.class-list-item:hover {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Update active/selected states */
+.sidebar-item.active,
+.class-list-item.selected {
+    background-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+.sidebar-item.active::before,
+.class-list-item.selected::before {
+    background: #ffffff !important;
+}
+
+/* Update role badges */
+.role-badge {
+    background: rgba(255, 255, 255, 0.2) !important;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.role-badge.teacher {
+    background: rgba(52, 168, 83, 0.3) !important;
+    color: #34a853 !important;
+}
+
+.role-badge.student {
+    background: rgba(66, 133, 244, 0.3) !important;
+    color: #4285f4 !important;
+}
+/* ===== FIX SIDEBAR SECTION HEADERS ===== */
+/* This will fix the "CLASS" and other section headers to be visible */
+
+/* 1. Fix all section headers in sidebar */
+.sidebar .section-header {
+    color: rgba(255, 255, 255, 0.7) !important;
+    font-size: 0.75rem !important;
+    font-weight: 500 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    padding: 12px 24px 4px 24px !important;
+    margin-top: 8px !important;
+    background: transparent !important;
+}
+
+/* 2. Fix dropdown headers */
+.sidebar .dropdown-header {
+    color: rgba(255, 255, 255, 0.8) !important;
+    font-size: 0.875rem !important;
+    font-weight: 500 !important;
+    padding: 8px 24px !important;
+    margin: 0 !important;
+    background: transparent !important;
+    border: none !important;
+}
+
+.sidebar .dropdown-header:hover {
+    color: #ffffff !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* 3. Fix dropdown arrow color */
+.sidebar .dropdown-arrow {
+    color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.sidebar .dropdown-header:hover .dropdown-arrow {
+    color: #ffffff !important;
+}
+
+/* 4. Keep regular sidebar items white */
+.sidebar-item,
+.sidebar-text,
+.class-name,
+.class-list-item {
+    color: #ffffff !important;
+}
+
+/* 5. Make class details slightly lighter */
+.class-details {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+/* ===== FIX EXAM MENU BUTTON VISIBILITY ===== */
+.exam-menu-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
   background: white;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 12px;
-  transition: all 0.2s;
-}
-
-.exam-card:hover {
-  border-color: #d1d5db;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transform: translateY(-1px);
-}
-
-.exam-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 12px;
-}
-
-.exam-title-section {
-  flex: 1;
-  margin-right: 8px;
-}
-
-.exam-title {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: #111827;
-  margin: 0 0 4px 0;
-}
-
-.exam-description {
-  font-size: 0.875rem;
-  color: #6b7280;
-  margin: 0 0 8px 0;
-}
-
-.exam-status {
-  display: inline-block;
-  font-size: 0.75rem;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-weight: 500;
-}
-
-.exam-status.posted {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.exam-status.draft {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.exam-status.ended {
-  background: #fee2e2;
-  color: #991b1b;
-}
-
-/* Type badge */
-.exam-type-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.75rem;
+  border-radius: 4px;
   padding: 4px 8px;
-  border-radius: 12px;
+  cursor: pointer;
+  color: #374151 !important; /* Dark gray for visibility */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  transition: all 0.2s ease;
+}
+
+.exam-menu-btn:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+  color: #111827 !important; /* Even darker on hover */
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* Make sure the icon is visible */
+.exam-menu-btn svg {
+  width: 16px;
+  height: 16px;
+  color: inherit !important; /* Inherit color from button */
+}
+/* Pending Exams Animation */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Exam Card Hover Effects */
+.exam-card-preview {
+  transition: all 0.3s ease;
+}
+
+.exam-card-preview:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Live Class Indicator */
+.live-indicator {
+  position: relative;
+}
+
+.live-indicator::before {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background-color: #ef4444;
+  border-radius: 50%;
+  top: 50%;
+  left: -12px;
+  transform: translateY(-50%);
+  animation: pulse 1.5s infinite;
+}
+
+/* Badge Styles */
+.pending-badge {
+  box-shadow: 0 0 0 2px white;
+}
+
+/* Modal Overlay */
+.modal-overlay {
+  backdrop-filter: blur(4px);
+}
+/* Fix for enrolled dropdown text display */
+.enrolled-dropdown .class-list-item {
+  padding: 10px 16px;
+  margin: 2px 8px;
+  border-radius: 6px;
+}
+
+.enrolled-dropdown .class-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.enrolled-dropdown .class-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: white;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.enrolled-dropdown .class-details {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+/* Fix dropdown arrow direction */
+.dropdown-arrow {
+  transition: transform 0.2s;
+  transform: rotate(-90deg);
+}
+
+.dropdown-arrow.open {
+  transform: rotate(0deg);
+}
+/* Fix enrolled dropdown background color */
+.enrolled-dropdown {
+  margin-left: 8px;
+  border-left: 2px solid rgba(255, 255, 255, 0.2);
+  padding-left: 8px;
+  background-color: #4F5D75 !important;
+  border-radius: 0 0 8px 8px;
+  margin-top: 2px;
+}
+
+/* Ensure the dropdown content inherits the background */
+.enrolled-classes-list {
+  background-color: transparent !important;
+}
+
+/* Fix class list items to match sidebar background */
+.enrolled-dropdown .class-list-item {
+  background-color: transparent !important;
+  border-radius: 6px;
+  margin: 2px 4px;
+  padding: 8px 12px;
+  transition: background-color 0.2s;
+}
+
+.enrolled-dropdown .class-list-item:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.enrolled-dropdown .class-list-item.selected {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+/* Ensure text is visible */
+.enrolled-dropdown .class-name {
+  color: white !important;
+  font-size: 14px;
   font-weight: 500;
 }
 
-/* Add some spacing for the menu button */
-.exam-actions-dropdown {
-  position: relative;
+.enrolled-dropdown .class-details {
+  color: rgba(255, 255, 255, 0.8) !important;
+  font-size: 12px;
+}
+
+/* Fix the role badge in dropdown */
+.enrolled-dropdown .role-badge.student {
+  background: rgba(66, 133, 244, 0.3) !important;
+  color: #4285f4 !important;
+  border-color: rgba(66, 133, 244, 0.5) !important;
+}
+
+/* Fix dropdown header styles */
+.sidebar .dropdown-header {
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  padding: 12px 24px !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sidebar .dropdown-header:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-radius: 4px;
+}
+
+/* Fix the arrow color */
+.dropdown-arrow {
+  color: rgba(255, 255, 255, 0.7) !important;
+  transition: transform 0.2s ease;
+}
+
+.dropdown-arrow.open {
+  color: white !important;
+}
+/* Add these to your existing Dashboard.css */
+
+/* Fix for input focus and interaction */
+.join-modal input[type="text"] {
+  caret-color: #1a73e8; /* Blue cursor */
+  letter-spacing: 1px; /* Better spacing for uppercase */
+  font-family: 'Roboto Mono', monospace; /* Monospace for codes */
+  font-weight: 500;
+}
+
+/* Prevent input from losing focus */
+.join-modal input:focus {
+  outline: none;
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
+}
+
+/* Modal overlay fix to prevent click-through */
+.fixed.inset-0 {
+  pointer-events: auto;
+}
+
+/* Input field specific fixes */
+.join-modal input {
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Remove any conflicting styles */
+.class-selection input,
+.announcement-textarea,
+.edit-announcement-textarea,
+.comment-input {
+  /* These styles should not affect join modal input */
+}
+
+/* Specific selector for join modal input */
+#joinCode {
+  background: white !important;
+  border: 2px solid #d1d5db !important;
+  transition: all 0.2s ease !important;
+}
+
+#joinCode:focus {
+  border-color: #1a73e8 !important;
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1) !important;
+}
+
+#joinCode:hover {
+  border-color: #9ca3af !important;
+}
+
+/* Modal content click handling */
+.bg-white.rounded-lg {
+  pointer-events: auto;
 }

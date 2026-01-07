@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { io } from "socket.io-client";
 import { FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash, FaUser, FaComment, FaExclamationTriangle, FaEye } from "react-icons/fa";
+import StudentExamCamera from '../components/StudentExamCamera';
 
 // Face detection hook
 const useFaceDetection = (videoRef, isStudent, isEnabled = true) => {
@@ -128,6 +129,13 @@ export default function ExamRoom({ roomId }) {
   const cleanup = () => {
     console.log("🧹 Cleaning up connections...");
     
+    // Detach video element
+    if (localVideoRef.current && localVideoRef.current.srcObject) {
+      const tracks = localVideoRef.current.srcObject.getTracks();
+      tracks.forEach(track => track.stop());
+      localVideoRef.current.srcObject = null;
+    }
+    
     Object.values(peersRef.current).forEach(pc => {
       if (pc && typeof pc.close === 'function') {
         pc.close();
@@ -212,19 +220,44 @@ export default function ExamRoom({ roomId }) {
     }
     isInitializedRef.current = true;
 
-    console.log(" Initializing Exam Room...");
+    console.log("🎯 Initializing Exam Room...");
     socketRef.current = io("http://localhost:3000");
 
     const initMediaStream = async () => {
       try {
+        console.log("🎥 Attempting to get camera access for Live Class...");
+        
+        // Stop any existing stream first
+        if (localStreamRef.current) {
+          localStreamRef.current.getTracks().forEach(track => track.stop());
+          localStreamRef.current = null;
+        }
+        
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: true, 
+          video: { 
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: 'user'
+          }, 
           audio: true 
+        }).catch(err => {
+          console.error("❌ Camera access error:", err);
+          alert(`🎥 Camera Error: ${err.message}. Please refresh and allow camera access.`);
+          return null;
         });
         
+        if (!stream) return;
+        
+        console.log("✅ Camera accessed successfully for Live Class");
         localStreamRef.current = stream;
+        
+        // Force video element update
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
+          localVideoRef.current.onloadeddata = () => {
+            console.log("✅ Video loaded for Live Class");
+            localVideoRef.current.play().catch(e => console.warn("Play warning:", e));
+          };
         }
 
         socketRef.current.emit("join-room", { 
@@ -239,12 +272,23 @@ export default function ExamRoom({ roomId }) {
         }, 1000);
 
       } catch (error) {
-        console.error("Error accessing media devices:", error);
-        alert("Camera and microphone access is required for the exam.");
+        console.error("❌ Error accessing media devices:", error);
+        alert("Camera and microphone access is required for the Live Class exam.");
       }
     };
 
-    initMediaStream();
+    // Only auto-init for teachers
+    if (isTeacher) {
+      initMediaStream();
+    } else {
+      // For students, just join the socket room - camera will be handled by StudentExamCamera
+      socketRef.current.emit("join-room", { 
+        roomId, 
+        name: currentUserName, 
+        id: currentUserId,
+        isTeacher: false 
+      });
+    }
 
     // Socket event handlers
     socketRef.current.on("room-participants", (participants) => {
@@ -463,24 +507,10 @@ export default function ExamRoom({ roomId }) {
   };
 
   const toggleCam = () => {
-    if (!localStreamRef.current) return;
-    
-    const videoTracks = localStreamRef.current.getVideoTracks();
-    if (videoTracks.length > 0) {
-      const newCamState = !camOn;
-      videoTracks[0].enabled = newCamState;
-      setCamOn(newCamState);
-      
-      if (localVideoRef.current) {
-        if (newCamState) {
-          localVideoRef.current.srcObject = localStreamRef.current;
-        } else {
-          localVideoRef.current.srcObject = null;
-        }
-      }
-      
-      broadcastMediaStatus();
-    }
+    const newState = !camOn;
+    setCamOn(newState);
+    broadcastMediaStatus();
+    console.log(`✅ Camera toggled ${newState ? 'ON' : 'OFF'}`);
   };
 
   const toggleMic = () => {
@@ -725,79 +755,69 @@ export default function ExamRoom({ roomId }) {
           </div>
         </div>
 
-        {/* Bottom Bar - Camera Feed & Controls */}
+        {/* Bottom Bar - Camera Feed & Controls - FIXED */}
         <div style={{
           background: "white",
           borderTop: "1px solid #e0e0e0",
-          padding: "10px 20px",
+          padding: "15px 20px",
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between"
+          justifyContent: "space-between",
+          boxShadow: "0 -2px 8px rgba(0,0,0,0.1)"
         }}>
-          {/* Camera Feed */}
+          {/* Camera Feed - FIXED */}
           <div style={{
             display: "flex",
             alignItems: "center",
             gap: "15px"
           }}>
             <div style={{
-              position: "relative",
-              width: "120px",
-              height: "90px",
-              border: "2px solid #4285f4",
-              borderRadius: "8px",
+              width: "160px",
+              height: "120px",
+              border: "3px solid #4285f4",
+              borderRadius: "10px",
               overflow: "hidden",
-              background: "#333"
+              background: "#000",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
             }}>
-              <video
-                ref={localVideoRef}
-                autoPlay
-                muted
-                playsInline
-                style={{ 
-                  width: "100%", 
-                  height: "100%", 
-                  objectFit: "cover",
-                  transform: "scaleX(-1)",
-                  display: camOn ? "block" : "none"
-                }}
+              <StudentExamCamera 
+                examId={roomId}
+                isRequired={true}
               />
-              {!camOn && (
-                <div style={{
-                  position: "absolute",
-                  top: 0, left: 0, width: "100%", height: "100%",
-                  display: "flex", justifyContent: "center", alignItems: "center",
-                  fontSize: "24px", color: "#fff", backgroundColor: "#999"
-                }}>
-                  <FaUser />
-                </div>
-              )}
             </div>
             
             <div style={{ fontSize: "14px", color: "#5f6368" }}>
-              <div style={{ fontWeight: "bold" }}>Your Camera</div>
-              <div style={{ fontSize: "12px" }}>Live monitoring</div>
+              <div style={{ fontWeight: "bold", display: "flex", alignItems: "center", gap: "8px", fontSize: "16px" }}>
+                <FaVideo style={{ color: "#4285f4" }} /> 
+                Live Proctoring Camera
+              </div>
+              <div style={{ fontSize: "13px", marginTop: "6px" }}>
+                ✅ Camera monitoring active
+              </div>
             </div>
           </div>
 
           {/* Controls */}
-          <div style={{ display: "flex", gap: "10px" }}>
+          <div style={{ display: "flex", gap: "12px" }}>
             <button 
               onClick={toggleCam}
               style={{ 
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
-                padding: "8px 16px",
-                border: "1px solid #dadce0",
-                borderRadius: "4px",
+                padding: "10px 18px",
+                border: "2px solid",
+                borderColor: camOn ? "#4caf50" : "#f44336",
+                borderRadius: "8px",
                 background: "white",
                 color: camOn ? "#4caf50" : "#f44336",
                 cursor: "pointer",
-                fontSize: "14px"
+                fontSize: "14px",
+                fontWeight: "bold",
+                transition: "all 0.2s"
               }}
             >
-              {camOn ? <FaVideo /> : <FaVideoSlash />}
+              {camOn ? <FaVideo size={16} /> : <FaVideoSlash size={16} />}
               Camera {camOn ? "On" : "Off"}
             </button>
             
@@ -807,16 +827,19 @@ export default function ExamRoom({ roomId }) {
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
-                padding: "8px 16px",
-                border: "1px solid #dadce0",
-                borderRadius: "4px",
+                padding: "10px 18px",
+                border: "2px solid",
+                borderColor: micOn ? "#4caf50" : "#f44336",
+                borderRadius: "8px",
                 background: "white",
                 color: micOn ? "#4caf50" : "#f44336",
                 cursor: "pointer",
-                fontSize: "14px"
+                fontSize: "14px",
+                fontWeight: "bold",
+                transition: "all 0.2s"
               }}
             >
-              {micOn ? <FaMicrophone /> : <FaMicrophoneSlash />}
+              {micOn ? <FaMicrophone size={16} /> : <FaMicrophoneSlash size={16} />}
               Mic {micOn ? "On" : "Off"}
             </button>
 
@@ -827,16 +850,17 @@ export default function ExamRoom({ roomId }) {
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
-                padding: "8px 16px",
-                border: "1px solid #dadce0",
-                borderRadius: "4px",
+                padding: "10px 18px",
+                border: "2px solid #4285f4",
+                borderRadius: "8px",
                 background: "#4285f4",
                 color: "white",
                 cursor: "pointer",
-                fontSize: "14px"
+                fontSize: "14px",
+                fontWeight: "bold"
               }}
             >
-              <FaComment />
+              <FaComment size={16} />
               Chat
             </button>
           </div>
@@ -846,30 +870,31 @@ export default function ExamRoom({ roomId }) {
         {messagesOpen && (
           <div style={{
             position: "fixed",
-            bottom: "80px",
+            bottom: "160px",
             right: "20px",
-            width: "300px",
+            width: "320px",
             height: "400px",
             background: "white",
-            border: "1px solid #ccc",
-            borderRadius: "8px",
+            border: "2px solid #4285f4",
+            borderRadius: "12px",
             display: "flex",
             flexDirection: "column",
             zIndex: 1000,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
+            boxShadow: "0 8px 24px rgba(0,0,0,0.2)"
           }}>
             <div style={{  
               background: "#4285f4",
               color: "white",
-              padding: "12px",
+              padding: "15px",
               borderBottom: "1px solid #ccc",
               fontWeight: "bold",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              borderRadius: "8px 8px 0 0"
+              borderRadius: "10px 10px 0 0",
+              fontSize: "16px"
             }}>
-              Exam Chat
+              <span>💬 Live Class Chat</span>
               <button
                 onClick={() => setMessagesOpen(false)}
                 style={{
@@ -877,7 +902,8 @@ export default function ExamRoom({ roomId }) {
                   background: "transparent",
                   color: "white",
                   cursor: "pointer",
-                  fontSize: "16px",
+                  fontSize: "18px",
+                  fontWeight: "bold"
                 }}
               >
                 ✕
@@ -886,7 +912,7 @@ export default function ExamRoom({ roomId }) {
 
             <div style={{ 
               flex: 1,
-              padding: "10px",
+              padding: "15px",
               overflowY: "auto",
               fontSize: "14px",
               background: "#fafafa"
@@ -895,27 +921,32 @@ export default function ExamRoom({ roomId }) {
                 <div style={{ 
                   color: "#888", 
                   textAlign: "center", 
-                  marginTop: "20px",
+                  marginTop: "40px",
                   fontStyle: "italic"
                 }}>
+                  <div style={{ fontSize: "48px", marginBottom: "10px" }}>💬</div>
                   No messages yet
+                  <div style={{ fontSize: "12px", marginTop: "5px" }}>Start a conversation with your teacher</div>
                 </div>
               ) : (
                 messages.map(msg => (
                   <div key={msg.id} style={{ 
-                    marginBottom: "8px",
-                    padding: "8px",
+                    marginBottom: "10px",
+                    padding: "10px",
                     background: msg.isAlert ? "#ffebee" : "white",
-                    borderRadius: "6px",
-                    borderLeft: msg.isAlert ? "3px solid #f44336" : "3px solid #4285f4"
+                    borderRadius: "8px",
+                    borderLeft: msg.isAlert ? "4px solid #f44336" : "4px solid #4285f4",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.05)"
                   }}>
                     <strong style={{ 
                       color: msg.isAlert ? "#f44336" : "#4285f4",
-                      fontSize: "12px"
+                      fontSize: "13px",
+                      display: "block",
+                      marginBottom: "4px"
                     }}>
                       {msg.sender}:
                     </strong> 
-                    <div style={{ marginTop: "4px", fontSize: "13px" }}>
+                    <div style={{ fontSize: "14px", color: "#333" }}>
                       {msg.text}
                     </div>
                   </div>
@@ -923,18 +954,18 @@ export default function ExamRoom({ roomId }) {
               )}
             </div>
 
-            <div style={{ display: "flex", borderTop: "1px solid #ccc" }}>
+            <div style={{ display: "flex", borderTop: "1px solid #e0e0e0", padding: "10px" }}>
               <input
                 type="text"
                 value={messageInput}
                 onChange={(e) => setMessageInput(e.target.value)}
-                placeholder="Type your message..."
+                placeholder="Type your message to teacher..."
                 style={{
                   flex: 1,
-                  padding: "10px",
-                  border: "none",
+                  padding: "12px 15px",
+                  border: "1px solid #dadce0",
+                  borderRadius: "8px 0 0 8px",
                   outline: "none",
-                  borderRadius: "0 0 0 8px",
                   fontSize: "14px"
                 }}
                 onKeyDown={(e) => e.key === "Enter" && sendMessage()}
@@ -942,13 +973,14 @@ export default function ExamRoom({ roomId }) {
               <button
                 onClick={sendMessage}
                 style={{
-                  padding: "0 15px",
+                  padding: "0 20px",
                   border: "none",
                   background: "#4285f4",
                   color: "white",
                   cursor: "pointer",
-                  borderRadius: "0 0 8px 0",
-                  fontSize: "14px"
+                  borderRadius: "0 8px 8px 0",
+                  fontSize: "14px",
+                  fontWeight: "bold"
                 }}
               >
                 Send

@@ -1,9 +1,11 @@
-// StudentQuizPage.jsx - COMPLETE FIXED VERSION WITH ENHANCED DISCONNECTION HANDLER
+// StudentQuizPage.jsx - UPDATED CAMERA VERSION
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { getQuizForStudent, submitQuizAnswers } from '../lib/api';
 import './StudentQuizPage.css';
+import StudentExamCamera from '../components/StudentExamCamera';
+
 
 // ==================== WAITING ROOM COMPONENT ====================
 const WaitingRoomComponent = React.memo(({ 
@@ -47,7 +49,6 @@ const WaitingRoomComponent = React.memo(({
         newStatus.camera.granted = true;
       }
 
-      // ✅ MICROPHONE IS NOW MANDATORY
       if (requiresMicrophone) {
         try {
           const micStream = await navigator.mediaDevices.getUserMedia({ 
@@ -68,7 +69,6 @@ const WaitingRoomComponent = React.memo(({
 
       setPermissionStatus(newStatus);
       
-      // ✅ STRICTER REQUIREMENT: MICROPHONE IS MANDATORY IF REQUIRED
       const allRequiredGranted = 
         (!requiresCamera || newStatus.camera.granted) && 
         (!requiresMicrophone || newStatus.microphone.granted);
@@ -106,7 +106,6 @@ const WaitingRoomComponent = React.memo(({
     if (canEnterExam) {
       onExamStarted();
     } else {
-      // ✅ PREVENT ENTRY IF MICROPHONE NOT GRANTED
       if (requiresMicrophone && !permissionStatus.microphone.granted) {
         alert('🎤 Microphone access is REQUIRED to enter the exam. Please grant microphone permission.');
         handleRetry();
@@ -130,7 +129,6 @@ const WaitingRoomComponent = React.memo(({
         </div>
 
         <div className="waiting-content">
-          {/* ✅ MICROPHONE REQUIREMENT WARNING */}
           {requiresMicrophone && (
             <div className="requirement-warning critical">
               <div className="warning-icon">🎤</div>
@@ -178,7 +176,6 @@ const WaitingRoomComponent = React.memo(({
             )}
           </div>
 
-          {/* ✅ ENTRY STATUS */}
           <div className="entry-status">
             {canEnterExam ? (
               <div className="status-granted">
@@ -196,7 +193,7 @@ const WaitingRoomComponent = React.memo(({
                   <p>You must grant all required permissions to enter the exam.</p>
                   {requiresMicrophone && !permissionStatus.microphone.granted && (
                     <p className="critical-warning">🎤 <strong>Microphone access is MANDATORY for this exam.</strong></p>
-                  )}
+                    )}
                 </div>
               </div>
             )}
@@ -357,7 +354,6 @@ const MicrophoneComponent = React.memo(({
         
         const inputData = e.inputBuffer.getChannelData(0);
         
-        // Calculate audio level for visualization
         let sum = 0;
         for (let i = 0; i < inputData.length; i++) {
           sum += inputData[i] * inputData[i];
@@ -367,7 +363,6 @@ const MicrophoneComponent = React.memo(({
         audioLevelRef.current = level;
         setAudioLevel(level);
 
-        // Detect speaking state
         const isCurrentlySpeaking = level > 15;
         if (isCurrentlySpeaking !== micState.isSpeaking) {
           setMicState(prev => ({ ...prev, isSpeaking: isCurrentlySpeaking }));
@@ -676,361 +671,6 @@ const MicrophoneComponent = React.memo(({
   );
 });
 
-// ==================== CAMERA COMPONENT ====================
-const CameraComponent = React.memo(({ 
-  requiresCamera, 
-  onCameraStateChange,
-  onProctoringAlert,
-  examId,
-  teacherDetectionSettings,
-  socketRef,
-  tabSwitchCount = 0,
-  windowBlurCount = 0,
-  microphoneActive = false,
-  isSpeaking = false
-}) => {
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const [cameraState, setCameraState] = useState({
-    isConnected: false,
-    isInitializing: false,
-    error: '',
-    hasCamera: false
-  });
-  const [camOn, setCamOn] = useState(true);
-  
-  const captureIntervalRef = useRef(null);
-
-  const getDetectionTypeFromActivity = (activity) => {
-    if (activity.includes('TAB')) return 'tab_switching';
-    if (activity.includes('AUDIO')) return 'audio_detection';
-    if (activity.includes('GESTURE')) return 'suspicious_gesture';
-    if (activity.includes('MULTIPLE')) return 'multiple_people';
-    if (activity.includes('GAZE')) return 'gaze_deviation';
-    if (activity.includes('HEAD')) return 'head_pose';
-    if (activity.includes('MOUTH')) return 'mouth_movement';
-    if (activity.includes('NO FACE')) return 'no_face_detected';
-    if (activity.includes('LOW ATTENTION')) return 'low_attention_score';
-    
-    return 'unknown';
-  };
-
-  const captureFrame = useCallback(async () => {
-    if (!videoRef.current || !requiresCamera || !cameraState.isConnected || !camOn) return;
-    
-    try {
-      const video = videoRef.current;
-      if (video.videoWidth === 0 || video.videoHeight === 0) return;
-
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      const imageData = canvas.toDataURL('image/jpeg', 0.8);
-      
-      const studentSocketId = socketRef.current?.id || 'unknown-socket';
-        
-      const detectionData = {
-        image: imageData,
-        exam_id: examId,
-        student_id: 'student-user',
-        student_socket_id: studentSocketId,
-        timestamp: new Date().toISOString(),
-        detection_settings: teacherDetectionSettings,
-        behavior_data: {
-          tab_switch_count: tabSwitchCount,
-          window_blur_count: windowBlurCount,
-          last_activity: new Date().toISOString(),
-          microphone_active: microphoneActive,
-          is_speaking: isSpeaking
-        }
-      };
-      
-      console.log('📊 Sending detection with behavior data:', {
-        tabSwitches: tabSwitchCount,
-        windowBlurs: windowBlurCount,
-        micActive: microphoneActive,
-        speaking: isSpeaking
-      });
-      
-      const response = await fetch('http://localhost:5000/detect', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(detectionData)
-      });
-      
-      if (response.ok) {
-        const results = await response.json();
-        console.log('📊 Proctoring results:', results);
-        
-        if (results.suspiciousActivities && results.suspiciousActivities.length > 0) {
-            const filteredAlerts = results.suspiciousActivities.filter(activity => {
-            if (activity.includes('face') && !teacherDetectionSettings.faceDetection) return false;
-            if (activity.includes('gaze') && !teacherDetectionSettings.gazeDetection) return false;
-            if (activity.includes('phone') && !teacherDetectionSettings.phoneDetection) return false;
-            if (activity.includes('mouth') && !teacherDetectionSettings.mouthDetection) return false;
-            if (activity.includes('Multiple') && !teacherDetectionSettings.multiplePeopleDetection) return false;
-            if (activity.includes('AUDIO') && !teacherDetectionSettings.audioDetection) return false;
-            if (activity.includes('GESTURE') && !teacherDetectionSettings.handGestureDetection) return false;
-            if (activity.includes('TAB') && !teacherDetectionSettings.tabSwitchDetection) return false;
-            if (activity.includes('SCREENSHOT') && !teacherDetectionSettings.screenshotDetection) return false;
-            if (activity.includes('NO FACE') && !teacherDetectionSettings.faceDetection) return false;
-            if (activity.includes('LOW ATTENTION') && !teacherDetectionSettings.attentionDetection) return false;
-            return true;
-          });
-          
-          filteredAlerts.forEach(activity => {
-            onProctoringAlert({
-              message: activity,
-              type: activity.includes('phone') || activity.includes('Multiple') || activity.includes('TAB') ? 'danger' : 'warning',
-              severity: activity.includes('phone') || activity.includes('Multiple') || activity.includes('TAB') ? 'high' : 'medium',
-              timestamp: new Date().toLocaleTimeString(),
-              detectionType: getDetectionTypeFromActivity(activity)
-            });
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Proctoring capture error:', error);
-    }
-  }, [requiresCamera, examId, onProctoringAlert, cameraState.isConnected, camOn, teacherDetectionSettings, socketRef, tabSwitchCount, windowBlurCount, microphoneActive, isSpeaking]);
-  
-  const startProctoring = useCallback(() => {
-    if (!requiresCamera || !cameraState.isConnected) return;
-    captureIntervalRef.current = setInterval(captureFrame, 3000);
-    console.log('📹 Proctoring started - capturing frames every 3 seconds');
-  }, [requiresCamera, captureFrame, cameraState.isConnected]);
-  
-  const stopProctoring = useCallback(() => {
-    if (captureIntervalRef.current) {
-      clearInterval(captureIntervalRef.current);
-      captureIntervalRef.current = null;
-      console.log('🛑 Proctoring stopped');
-    }
-  }, []);
-
-  const initializeCamera = useCallback(async () => {
-    if (!requiresCamera) return;
-
-    try {
-      setCameraState(prev => ({ ...prev, isInitializing: true, error: '' }));
-
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-      }
-
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('Camera not supported');
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          facingMode: 'user',
-          frameRate: { ideal: 15, max: 30 },
-          exposureMode: 'continuous',
-          whiteBalanceMode: 'continuous'
-        },
-        audio: false
-      });
-      
-      streamRef.current = stream;
-
-      if (!videoRef.current) {
-        throw new Error('Video element not available');
-      }
-
-      const videoElement = videoRef.current;
-      videoElement.srcObject = stream;
-      videoElement.style.transform = 'scaleX(-1)';
-
-      await videoElement.play();
-
-      setCameraState(prev => ({
-        ...prev,
-        isConnected: true,
-        isInitializing: false,
-        hasCamera: true,
-        error: ''
-      }));
-      
-      onCameraStateChange?.(true);
-      startProctoring();
-
-    } catch (error) {
-      console.error('Camera initialization failed:', error);
-      
-      let userMessage = 'Camera access failed';
-      if (error.name === 'NotAllowedError') userMessage = 'Camera permission denied';
-      else if (error.name === 'NotFoundError') userMessage = 'No camera found';
-      else if (error.name === 'NotReadableError') userMessage = 'Camera is busy';
-      
-      setCameraState(prev => ({
-        ...prev,
-        isConnected: false,
-        isInitializing: false,
-        error: userMessage
-      }));
-      onCameraStateChange?.(false);
-    }
-  }, [requiresCamera, onCameraStateChange, startProctoring]);
-
-  useEffect(() => {
-    if (!requiresCamera) return;
-
-    let mounted = true;
-
-    const initCamera = async () => {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const cameras = devices.filter(device => device.kind === 'videoinput');
-        
-        if (mounted) {
-          setCameraState(prev => ({ ...prev, hasCamera: cameras.length > 0 }));
-        }
-
-        if (cameras.length > 0 && mounted) {
-          await initializeCamera();
-        } else if (mounted) {
-          setCameraState(prev => ({ 
-            ...prev, 
-            error: 'No camera found', 
-            isInitializing: false 
-          }));
-        }
-      } catch (error) {
-        if (mounted) {
-          setCameraState(prev => ({ 
-            ...prev, 
-            error: 'Camera setup failed', 
-            isInitializing: false 
-          }));
-        }
-      }
-    };
-
-    initCamera();
-
-    return () => {
-      mounted = false;
-      stopProctoring();
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-      }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
-    };
-  }, [requiresCamera, initializeCamera, stopProctoring]);
-
-  const toggleCam = () => {
-    if (!streamRef.current) return;
-    
-    const videoTracks = streamRef.current.getVideoTracks();
-    if (videoTracks.length > 0) {
-      const newCamState = !camOn;
-      videoTracks[0].enabled = newCamState;
-      setCamOn(newCamState);
-      onCameraStateChange?.(newCamState);
-      
-      if (newCamState) {
-        startProctoring();
-      } else {
-        stopProctoring();
-      }
-    }
-  };
-
-  const retryCamera = async () => {
-    setCameraState(prev => ({ ...prev, error: '', isInitializing: true }));
-    await initializeCamera();
-  };
-
-  if (!requiresCamera) return null;
-
-  return (
-    <div className="camera-section">
-      <div className="camera-header">
-        <div className="user-info">
-          <span className="user-name">Camera</span>
-          <span className={`detection-status ${cameraState.isConnected ? 'normal' : 'bad'}`}>
-            {cameraState.isConnected ? '📹 Active' : '📹 Off'}
-          </span>
-          {cameraState.isConnected && camOn && (
-            <span className="proctoring-status">🔍 Monitoring</span>
-          )}
-        </div>
-        <div className="camera-controls-mini">
-          <button 
-            className={`control-icon ${camOn ? 'active' : ''}`}
-            onClick={toggleCam}
-            disabled={cameraState.isInitializing || !cameraState.isConnected}
-          >
-            {camOn ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18 10.48V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4.48l4 3.98v-11l-4 3.98z"/>
-              </svg>
-            ) : (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18 10.48V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4.48l4 3.98v-11l-4 3.98z"/>
-                <path d="M4 6v12h12V6H4zm11.58 2.08l1.42-1.42 1.42 1.42 1.42-1.42 1.42 1.42-1.42 1.42 1.42 1.42-1.42 1.42-1.42-1.42-1.42 1.42-1.42-1.42 1.42-1.42-1.42-1.42z" 
-                  fill="red"/>
-              </svg>
-            )}
-          </button>
-        </div>
-      </div>
-
-      <div className="camera-preview">
-        <video 
-          ref={videoRef}
-          autoPlay 
-          muted 
-          playsInline
-          className="camera-video"
-          style={{ 
-            display: (cameraState.isConnected && camOn) ? 'block' : 'none'
-          }}
-        />
-        
-        {(!cameraState.isConnected || !camOn) ? (
-          <div className="camera-offline">
-            <div className="offline-icon">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="#666">
-                <path d="M18 10.48V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4.48l4 3.98v-11l-4 3.98z"/>
-              </svg>
-            </div>
-            <p>{cameraState.error || 'Camera is off'}</p>
-            {cameraState.isInitializing && (
-              <div className="initializing-message">
-                <div className="loading-spinner-small"></div>
-                <span>Starting camera...</span>
-              </div>
-            )}
-          </div>
-        ) : null}
-      </div>
-
-      {cameraState.error && (
-        <div className="camera-error-footer">
-          <button className="retry-btn" onClick={retryCamera}>🔄 Retry Camera</button>
-          <span className="error-message">{cameraState.error}</span>
-        </div>
-      )}
-    </div>
-  );
-});
-
 // ==================== HEADER ALERTS COMPONENT ====================
 const HeaderAlerts = React.memo(({ alerts }) => {
   if (alerts.length === 0) return null;
@@ -1228,7 +868,7 @@ const ChatComponent = React.memo(({
   );
 });
 
-// ==================== MAIN STUDENT QUIZ COMPONENT ====================
+// ==================== MAIN STUDENT QUIZ COMPONENT - FIXED VERSION ====================
 export default function StudentQuizPage() {
   const { examId } = useParams();
   const navigate = useNavigate();
@@ -1278,7 +918,7 @@ export default function StudentQuizPage() {
     history: []
   });
 
-  // ✅ MICROPHONE STATE
+  // ✅ CAMERA & MICROPHONE STATE
   const [micState, setMicState] = useState({
     isConnected: false,
     isInitializing: false,
@@ -1288,7 +928,6 @@ export default function StudentQuizPage() {
     isSpeaking: false
   });
 
-  // Permission & Monitoring State
   const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [microphoneActive, setMicrophoneActive] = useState(false);
@@ -1309,17 +948,17 @@ export default function StudentQuizPage() {
   // Refs
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
-  const proctoringIntervalRef = useRef(null); // ✅ ADDED
+  const proctoringIntervalRef = useRef(null);
 
-  const [examType, setExamType] = useState('asynchronous'); // Default to async
+  const [examType, setExamType] = useState('asynchronous');
 
-  // ==================== TIMER PERSISTENCE FUNCTIONS ====================
+  // ==================== TIMER FUNCTIONS ====================
   const saveTimerToLocalStorage = (time, isRunning) => {
     const now = Date.now();
     const lastSave = localStorage.getItem(`last-save-${examId}`);
     
     if (lastSave && now - parseInt(lastSave) < 5000) {
-      return; // Skip save if less than 5 seconds since last save
+      return;
     }
     
     const timerData = {
@@ -1331,27 +970,22 @@ export default function StudentQuizPage() {
     
     localStorage.setItem(`timer-${examId}`, JSON.stringify(timerData));
     localStorage.setItem(`last-save-${examId}`, now.toString());
-    
-    console.log('💾 Timer saved to localStorage:', timerData);
   };
 
   const loadTimerFromLocalStorage = () => {
     try {
       const savedTimer = localStorage.getItem(`timer-${examId}`);
       if (savedTimer) {
-        const timerData = JSON.parse(savedTimer);
-        console.log('💾 Loaded timer from localStorage:', timerData);
-        return timerData;
+        return JSON.parse(savedTimer);
       }
     } catch (error) {
-      console.error('Error loading timer from localStorage:', error);
+      console.error('Error loading timer:', error);
     }
     return null;
   };
 
   const clearTimerFromLocalStorage = () => {
     localStorage.removeItem(`timer-${examId}`);
-    console.log('🧹 Timer cleared from localStorage');
   };
 
   // ==================== QUIZ MANAGEMENT ====================
@@ -1365,43 +999,28 @@ export default function StudentQuizPage() {
         const quizData = response.data;
         setQuiz(quizData);
         
-        // ✅ SET EXAM TYPE
+        // Set exam type
         const examTypeFromData = quizData.examType || 'asynchronous';
         setExamType(examTypeFromData);
         
-        // ✅ FIX: ASYNCHRONOUS EXAM - AUTO-START TIMER
+        // Set timer based on exam type
         if (examTypeFromData === 'asynchronous') {
-          // For async exams, use teacher's timer settings
           if (quizData.timerSettings?.totalSeconds) {
             setTimeLeft(quizData.timerSettings.totalSeconds);
-            setIsTimerRunning(true); // ✅ AUTO-START FOR ASYNC
-            console.log('⏰ Async exam - Auto-starting timer:', {
-              seconds: quizData.timerSettings.totalSeconds,
-              formatted: formatTime(quizData.timerSettings.totalSeconds)
-            });
+            setIsTimerRunning(true);
           } else if (quizData.timeLimit) {
-            // Fallback: convert minutes to seconds
-            const teacherTimeInSeconds = quizData.timeLimit * 60;
-            setTimeLeft(teacherTimeInSeconds);
-            setIsTimerRunning(true); // ✅ AUTO-START FOR ASYNC
-            console.log('⏰ Async exam - Auto-starting timer (converted):', {
-              minutes: quizData.timeLimit,
-              seconds: teacherTimeInSeconds
-            });
+            setTimeLeft(quizData.timeLimit * 60);
+            setIsTimerRunning(true);
           } else {
-            // Default fallback if no timer from teacher
-            setTimeLeft(60 * 60); // 1 hour default
-            setIsTimerRunning(true); // ✅ AUTO-START FOR ASYNC
-            console.log('⏰ Async exam - Using default timer (1 hour)');
+            setTimeLeft(60 * 60);
+            setIsTimerRunning(true);
           }
         } else if (examTypeFromData === 'live-class') {
-          // For live classes, wait for teacher to start
-          setTimeLeft(0); // No timer for live class
+          setTimeLeft(0);
           setIsTimerRunning(false);
-          console.log('🎥 Live class exam - Waiting for teacher');
         }
         
-        // Load answers as before
+        // Load answers
         const initialAnswers = {};
         if (quizData.questions) {
           quizData.questions.forEach((question, index) => {
@@ -1466,24 +1085,7 @@ export default function StudentQuizPage() {
       
       if (submissionResponse.success) {
         console.log('✅ Quiz answers submitted successfully');
-        // ✅ CLEAR TIMER FROM LOCALSTORAGE
         clearTimerFromLocalStorage();
-
-        try {
-          // If you have an API endpoint to mark exam as completed
-          // await api.post(`/exams/${examId}/complete`, {
-          //   score: submissionResponse.data.score,
-          //   maxScore: submissionResponse.data.maxScore,
-          //   percentage: submissionResponse.data.percentage,
-          //   answers: Object.entries(answers).map(([index, answer]) => ({
-          //     questionIndex: parseInt(index),
-          //     answer: answer
-          //   }))
-          // });
-          console.log("✅ Exam marked as completed in backend");
-        } catch (completionError) {
-          console.error("❌ Failed to mark exam as completed:", completionError);
-        }
 
         if (isAutoSubmit) {
           alert('⏰ Time is up! Your answers have been automatically submitted.');
@@ -1491,6 +1093,7 @@ export default function StudentQuizPage() {
           alert('✅ Answers submitted successfully! Your exam has been moved to "Done" section.');
         }
         
+        // Clean up media streams
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop());
         }
@@ -1524,7 +1127,7 @@ export default function StudentQuizPage() {
     }
   };
 
-  // ==================== ACCURATE TAB SWITCHING DETECTION ====================
+  // ==================== TAB SWITCH DETECTION ====================
   useEffect(() => {
     let lastFocusTime = Date.now();
     let isWindowFocused = true;
@@ -1534,7 +1137,6 @@ export default function StudentQuizPage() {
       const now = Date.now();
       const timeAway = now - lastFocusTime;
       
-      // ✅ IGNORE SHORT ABSENCES (less than 1 second)
       if (timeAway > 1000 && !isWindowFocused) {
         console.log('🔍 Window focused after:', timeAway + 'ms');
         isWindowFocused = true;
@@ -1564,7 +1166,6 @@ export default function StudentQuizPage() {
     };
 
     const handleVisibilityChange = () => {
-      // ✅ CHECK IF TAB SWITCH DETECTION IS ENABLED BY TEACHER
       if (!teacherDetectionSettings.tabSwitchDetection) {
         console.log('🛑 Tab switch detection is DISABLED by teacher - ignoring');
         return;
@@ -1574,7 +1175,6 @@ export default function StudentQuizPage() {
         const now = Date.now();
         const timeSinceLastSwitch = now - lastTabSwitchTime;
         
-        // ✅ PREVENT RAPID MULTIPLE DETECTIONS - minimum 2 seconds between detections
         if (timeSinceLastSwitch > 2000 && examStarted && permissionsGranted) {
           const newCount = tabSwitchCount + 1;
           setTabSwitchCount(newCount);
@@ -1582,7 +1182,6 @@ export default function StudentQuizPage() {
           
           console.log('💻 Tab switch detected! Count:', newCount, 'Time since last:', timeSinceLastSwitch + 'ms');
           
-          // ✅ ONLY SEND TO SERVER IF TAB SWITCH DETECTION IS ENABLED
           if (socketRef.current && teacherDetectionSettings.tabSwitchDetection) {
             socketRef.current.emit('tab-switch-detected', {
               examId: examId,
@@ -1593,7 +1192,6 @@ export default function StudentQuizPage() {
             });
           }
           
-          // ✅ ONLY SHOW ALERT AND COUNT ATTEMPTS IF TAB SWITCH DETECTION IS ENABLED
           if (teacherDetectionSettings.tabSwitchDetection) {
             const newAlert = {
               id: Date.now(),
@@ -1681,7 +1279,6 @@ export default function StudentQuizPage() {
   }, [navigate]);
 
   const handleExamStart = useCallback(() => {
-    // ✅ MICROPHONE IS NOW REQUIRED FROM THE START
     if (requiresMicrophone) {
       navigator.mediaDevices.getUserMedia({ audio: true })
         .then(stream => {
@@ -1689,11 +1286,9 @@ export default function StudentQuizPage() {
           setExamStarted(true);
           setPermissionsGranted(true);
           
-          // ✅ CHECK IF ASYNC EXAM - USE LOCAL TIMER
           if (examType === 'asynchronous') {
             console.log('⏰ Async exam - Starting local timer');
             
-            // For async exams, use teacher's timer immediately
             if (quiz?.timerSettings?.totalSeconds) {
               setTimeLeft(quiz.timerSettings.totalSeconds);
               setIsTimerRunning(true);
@@ -1702,10 +1297,8 @@ export default function StudentQuizPage() {
               setIsTimerRunning(true);
             }
             
-            // Save to localStorage
             saveTimerToLocalStorage(timeLeft, true);
           } else {
-            // For live classes, check saved timer
             const savedTimer = loadTimerFromLocalStorage();
             if (savedTimer && savedTimer.examId === examId) {
               console.log('⏰ Resuming from saved timer:', savedTimer);
@@ -1724,7 +1317,6 @@ export default function StudentQuizPage() {
       setExamStarted(true);
       setPermissionsGranted(true);
       
-      // ✅ SIMILAR LOGIC FOR ASYNC EXAMS
       if (examType === 'asynchronous') {
         console.log('⏰ Async exam - Starting local timer (no mic)');
         
@@ -1764,7 +1356,7 @@ export default function StudentQuizPage() {
       return;
     }
 
-    console.log('🔑 Connecting student socket IMMEDIATELY...');
+    console.log('🔑 Connecting student socket...');
 
     const newSocket = io('http://localhost:3000', {
       auth: { token: token },
@@ -1787,16 +1379,13 @@ export default function StudentQuizPage() {
         userRole: 'student'
       });
       
-      // ✅ CHECK IF ASYNC EXAM - DON'T WAIT FOR TEACHER TIMER
       if (examType === 'asynchronous' && timeLeft > 0) {
         console.log('⏰ Async exam detected - auto-starting local timer');
         setIsTimerRunning(true);
-        
-        // Save timer state immediately
         saveTimerToLocalStorage(timeLeft, true);
       }
 
-      // ✅ REQUEST TIME MULTIPLE TIMES FOR RELIABILITY
+      // Request time from teacher
       const requestTime = () => {
         if (newSocket.connected) {
           console.log('🕒 Requesting current time from teacher...');
@@ -1807,12 +1396,10 @@ export default function StudentQuizPage() {
         }
       };
 
-      // ==================== COMPREHENSIVE DISCONNECTION HANDLER ====================
-      // Add this handler after connection
+      // Disconnection handler
       newSocket.on('force-exit-exam', (data) => {
         console.log('🛑 Force exit from exam initiated by teacher:', data);
         
-        // Show appropriate message based on disconnection type
         let message = 'You have been disconnected from the exam session.';
         let alertType = 'warning';
         
@@ -1829,37 +1416,29 @@ export default function StudentQuizPage() {
           message = `Disconnected: ${data.reason}`;
         }
         
-        // Show alert to student
         alert(`${message}\n\nYou will be redirected to the dashboard.`);
         
-        // Clean up all media streams
+        // Clean up media streams
         if (localStream) {
-          console.log('🛑 Stopping local media stream');
           localStream.getTracks().forEach(track => {
             track.stop();
-            console.log(`✅ Stopped ${track.kind} track`);
           });
           setLocalStream(null);
         }
         
-        // Clean up WebRTC peer connections
         if (peerConnectionRef.current) {
-          console.log('🛑 Closing peer connection');
           peerConnectionRef.current.close();
           peerConnectionRef.current = null;
           setPeerConnection(null);
         }
         
-        // Stop proctoring intervals if any
         if (proctoringIntervalRef.current) {
           clearInterval(proctoringIntervalRef.current);
           proctoringIntervalRef.current = null;
         }
         
-        // Clear timer from localStorage
         clearTimerFromLocalStorage();
         
-        // Submit answers if data indicates to do so
         if (data.submitAnswers && Object.keys(answers).length > 0) {
           console.log('📤 Auto-submitting answers before disconnection');
           handleSubmitQuiz(true).catch(err => {
@@ -1867,12 +1446,10 @@ export default function StudentQuizPage() {
           });
         }
         
-        // Disconnect socket
         if (socketRef.current) {
           socketRef.current.disconnect();
         }
         
-        // Navigate back to dashboard
         setTimeout(() => {
           navigate('/dashboard', { 
             state: { 
@@ -1890,21 +1467,10 @@ export default function StudentQuizPage() {
         console.log('🔄 Received forced timer sync:', data);
         
         if (data.forceUpdate) {
-          // Clear localStorage to avoid conflicts
           clearTimerFromLocalStorage();
-          
-          // Immediately update state
           setTimeLeft(data.timeLeft);
           setIsTimerRunning(data.isTimerRunning);
-          
-          // Save new time
           saveTimerToLocalStorage(data.timeLeft, data.isTimerRunning);
-          
-          console.log('✅ Timer force-updated:', {
-            time: data.timeLeft,
-            running: data.isTimerRunning,
-            formatted: formatTime(data.timeLeft)
-          });
         }
       });
 
@@ -1922,27 +1488,16 @@ export default function StudentQuizPage() {
           examStarted: data.examStarted
         });
         
-        // ✅ FIX: Check if teacher sent minutes instead of seconds
         let receivedTime = data.timeLeft;
         
-        // If value is less than 100 and greater than 0, assume it's minutes
         if (receivedTime < 100 && receivedTime > 0) {
           console.log('🔄 Converting minutes to seconds:', receivedTime, 'minutes');
-          receivedTime = receivedTime * 60; // Convert to seconds
+          receivedTime = receivedTime * 60;
         }
         
-        // ✅ ALWAYS USE TEACHER'S TIME - OVERRIDE LOCALSTORAGE
         setTimeLeft(receivedTime);
         setIsTimerRunning(data.isTimerRunning);
-        
-        // Save teacher's time as source of truth
         saveTimerToLocalStorage(receivedTime, data.isTimerRunning);
-        
-        console.log('✅ Timer synced with teacher:', {
-          received: data.timeLeft,
-          converted: receivedTime,
-          formatted: formatTime(receivedTime)
-        });
         
         if (data.examStarted && !examStarted) {
           setExamStarted(true);
@@ -2035,7 +1590,7 @@ export default function StudentQuizPage() {
         });
       });
 
-      // ✅ REQUEST CURRENT TIME - SERVER WILL SEND PERSISTENT TIMER
+      // Request current time
       setTimeout(() => {
         if (newSocket.connected) {
           console.log('🕒 Requesting persistent timer from server...');
@@ -2074,10 +1629,8 @@ export default function StudentQuizPage() {
       if (requiresCamera) setCameraActive(true);
       if (requiresMicrophone) setMicrophoneActive(true);
       
-      // ✅ AUTO-START STUDENT TIMER
       setIsTimerRunning(true);
       
-      // Request current time from teacher
       setTimeout(() => {
         if (socketRef.current && socketRef.current.connected) {
           socketRef.current.emit('student-time-request', {
@@ -2128,10 +1681,15 @@ export default function StudentQuizPage() {
     });
 
     newSocket.on('exam-time-update', (data) => {
-      if (examType === 'asynchronous') {
+      const isLiveClass = examType === 'live-class' || quiz?.isLiveClass;
+
+      if (!isLiveClass && examType === 'asynchronous') {
         console.log('🛑 Ignoring teacher timer update for async exam');
         return;
       }
+
+      console.log('🎥 Live class - Accepting teacher timer update');
+      
       console.log('🕒 Received timer update from teacher:', {
         timeLeft: data.timeLeft,
         isTimerRunning: data.isTimerRunning,
@@ -2139,27 +1697,16 @@ export default function StudentQuizPage() {
         timestamp: data.timestamp
       });
       
-      // ✅ FIX: Convert if teacher sent minutes instead of seconds
       let receivedTime = data.timeLeft;
       
-      // Check if teacher sent minutes (if value is less than 100, assume minutes)
       if (receivedTime < 100 && receivedTime > 0) {
         console.log('🔄 Converting minutes to seconds:', receivedTime, 'minutes');
-        receivedTime = receivedTime * 60; // Convert minutes to seconds
+        receivedTime = receivedTime * 60;
       }
       
-      // Save to localStorage with proper conversion
       saveTimerToLocalStorage(receivedTime, data.isTimerRunning);
-      
-      // Update state
       setTimeLeft(receivedTime);
       setIsTimerRunning(data.isTimerRunning);
-      
-      console.log('✅ Timer updated:', {
-        received: data.timeLeft,
-        converted: receivedTime,
-        formatted: formatTime(receivedTime)
-      });
     });
 
     newSocket.on('camera-request', handleCameraRequest);
@@ -2169,7 +1716,6 @@ export default function StudentQuizPage() {
     newSocket.on('proctoring-alert', (alertData) => {
       console.log('🚨 Student received proctoring alert:', alertData);
       
-      // ✅ UPDATE ATTEMPTS FROM SERVER
       if (alertData.attemptsInfo) {
         setStudentAttempts({
           currentAttempts: alertData.attemptsInfo.currentAttempts,
@@ -2178,7 +1724,6 @@ export default function StudentQuizPage() {
           history: alertData.attemptsInfo.violation_history || []
         });
         
-        // Show warning if attempts low
         if (alertData.attemptsInfo.attemptsLeft <= 3 && alertData.attemptsInfo.attemptsLeft > 0) {
           const newAlert = {
             id: Date.now(),
@@ -2192,7 +1737,6 @@ export default function StudentQuizPage() {
         }
       }
       
-      // Add the alert to display
       const newAlert = {
         id: Date.now(),
         message: alertData.message || 'Suspicious activity detected',
@@ -2217,7 +1761,6 @@ export default function StudentQuizPage() {
         history: data.attempts.violation_history || []
       });
       
-      // Show warning if attempts low
       if (data.attempts.attempts_left <= 3 && data.attempts.attempts_left > 0) {
         const newAlert = {
           id: Date.now(),
@@ -2230,7 +1773,6 @@ export default function StudentQuizPage() {
         setProctoringAlerts(prev => [newAlert, ...prev.slice(0, 19)]);
       }
       
-      // Auto disconnect if attempts exhausted
       if (data.attempts.attempts_left <= 0) {
         alert('❌ You have been disconnected due to excessive violations.');
         setTimeout(() => {
@@ -2243,7 +1785,6 @@ export default function StudentQuizPage() {
       console.log('🛑 Live class ended by teacher:', data);
       
       if (data.examId === examId) {
-        // ✅ DISABLE JOIN BUTTON IMMEDIATELY
         setQuiz(prev => prev ? {
           ...prev,
           isActive: false,
@@ -2252,7 +1793,6 @@ export default function StudentQuizPage() {
         
         alert('⏹️ Live class has ended. You can no longer join this session.');
         
-        // ✅ IF CURRENTLY IN SESSION, REDIRECT OUT
         if (examStarted) {
           setTimeout(() => {
             navigate('/dashboard', {
@@ -2275,110 +1815,6 @@ export default function StudentQuizPage() {
       }
     };
   }, [examId]);
-
-  // ==================== STUDENT TIMER COUNTDOWN WITH PERSISTENCE ====================
-  useEffect(() => {
-    if (timeLeft === null || !isTimerRunning) {
-      console.log('⏰ Student timer stopped:', { 
-        timeLeft, 
-        isTimerRunning,
-        examStarted,
-        examType
-      });
-      return;
-    }
-
-    console.log('⏰ Student timer STARTED:', {
-      initialTime: timeLeft,
-      formatted: formatTime(timeLeft),
-      examStarted,
-      permissionsGranted,
-      examType: examType
-    });
-
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          console.log('⏰ Student time expired! Auto-submitting...');
-          clearTimerFromLocalStorage();
-          handleSubmitQuiz(true);
-          return 0;
-        }
-        
-        const newTime = prev - 1;
-        
-        // ✅ AUTO-SAVE TO LOCALSTORAGE EVERY 10 SECONDS
-        if (newTime % 10 === 0) {
-          saveTimerToLocalStorage(newTime, isTimerRunning);
-        }
-        
-        return newTime;
-      });
-    }, 1000);
-
-    return () => {
-      clearInterval(timer);
-      console.log('⏰ Student timer cleaned up');
-    };
-  }, [timeLeft, isTimerRunning, handleSubmitQuiz, examStarted, examType]);
-
-  // ✅ AUTO-SAVE ON PAUSE/RESUME
-  useEffect(() => {
-    if (timeLeft !== null) {
-      saveTimerToLocalStorage(timeLeft, isTimerRunning);
-      console.log('💾 Timer state saved:', {
-        time: timeLeft,
-        running: isTimerRunning
-      });
-    }
-  }, [isTimerRunning, timeLeft]);
-
-  // ✅ SAVE ON PAGE UNLOAD (WHEN STUDENT LEAVES)
-  useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      if (timeLeft !== null) {
-        saveTimerToLocalStorage(timeLeft, isTimerRunning);
-        console.log('💾 Timer saved before page unload');
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [timeLeft, isTimerRunning]);
-
-  // ✅ RECOVER TIMER ON RECONNECT
-  useEffect(() => {
-    if (socketRef.current && socketRef.current.connected && examStarted) {
-      // Re-request timer every 30 seconds to stay in sync
-      const interval = setInterval(() => {
-        if (socketRef.current && socketRef.current.connected) {
-          socketRef.current.emit('student-time-request', {
-            studentSocketId: socketRef.current.id,
-            roomId: `exam-${examId}`,
-            examId: examId
-          });
-        }
-      }, 30000);
-      
-      return () => clearInterval(interval);
-    }
-  }, [examStarted, examId]);
-
-  // ==================== AUTO-START TIMER WHEN RECEIVED ====================
-  useEffect(() => {
-    // Auto-start timer when we receive time from teacher
-    if (timeLeft !== null && timeLeft > 0 && examStarted) {
-      // Only start if we haven't already
-      if (!isTimerRunning) {
-        console.log(' Auto-starting student timer:', formatTime(timeLeft));
-        setIsTimerRunning(true);
-      }
-    }
-  }, [timeLeft, examStarted, isTimerRunning]);
 
   // ==================== WEBRTC HANDLERS ====================
   const handleCameraRequest = async (data, isRetry = false) => {
@@ -2406,11 +1842,6 @@ export default function StudentQuizPage() {
       });
       
       console.log('✅ Camera accessed successfully');
-      
-      const videoTrack = stream.getVideoTracks()[0];
-      const capabilities = videoTrack.getCapabilities();
-
-     
       
       setLocalStream(stream);
       setIsSharingCamera(true);
@@ -2722,6 +2153,98 @@ export default function StudentQuizPage() {
     });
   };
 
+  // ==================== TIMER EFFECTS ====================
+  useEffect(() => {
+    if (timeLeft === null || !isTimerRunning) {
+      console.log('⏰ Student timer stopped:', { 
+        timeLeft, 
+        isTimerRunning,
+        examStarted,
+        examType
+      });
+      return;
+    }
+
+    console.log('⏰ Student timer STARTED:', {
+      initialTime: timeLeft,
+      formatted: formatTime(timeLeft),
+      examStarted,
+      permissionsGranted,
+      examType: examType
+    });
+
+    const timer = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          console.log('⏰ Student time expired! Auto-submitting...');
+          clearTimerFromLocalStorage();
+          handleSubmitQuiz(true);
+          return 0;
+        }
+        
+        const newTime = prev - 1;
+        
+        if (newTime % 10 === 0) {
+          saveTimerToLocalStorage(newTime, isTimerRunning);
+        }
+        
+        return newTime;
+      });
+    }, 1000);
+
+    return () => {
+      clearInterval(timer);
+      console.log('⏰ Student timer cleaned up');
+    };
+  }, [timeLeft, isTimerRunning, handleSubmitQuiz, examStarted, examType]);
+
+  useEffect(() => {
+    if (timeLeft !== null) {
+      saveTimerToLocalStorage(timeLeft, isTimerRunning);
+    }
+  }, [isTimerRunning, timeLeft]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (timeLeft !== null) {
+        saveTimerToLocalStorage(timeLeft, isTimerRunning);
+        console.log('💾 Timer saved before page unload');
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [timeLeft, isTimerRunning]);
+
+  useEffect(() => {
+    if (socketRef.current && socketRef.current.connected && examStarted) {
+      const interval = setInterval(() => {
+        if (socketRef.current && socketRef.current.connected) {
+          socketRef.current.emit('student-time-request', {
+            studentSocketId: socketRef.current.id,
+            roomId: `exam-${examId}`,
+            examId: examId
+          });
+        }
+      }, 30000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [examStarted, examId]);
+
+  useEffect(() => {
+    if (timeLeft !== null && timeLeft > 0 && examStarted) {
+      if (!isTimerRunning) {
+        console.log(' Auto-starting student timer:', formatTime(timeLeft));
+        setIsTimerRunning(true);
+      }
+    }
+  }, [timeLeft, examStarted, isTimerRunning]);
+
   // ==================== UTILITY FUNCTIONS ====================
   const formatTime = (seconds) => {
     if (seconds === null || seconds === undefined) return '00:00';
@@ -2762,7 +2285,6 @@ export default function StudentQuizPage() {
     );
   }
 
-  // Add this check after permissions are granted but before exam starts
   if (permissionsGranted && !examStarted) {
     return (
       <div className="ready-waiting-room">
@@ -2832,7 +2354,7 @@ export default function StudentQuizPage() {
             🔄 Try Again
           </button>
           <button onClick={() => navigate('/dashboard')} className="back-btn">
-            ← Back to Dashboard
+            Back to Dashboard
           </button>
         </div>
       </div>
@@ -2846,7 +2368,7 @@ export default function StudentQuizPage() {
         <h2>❌ Quiz Not Found</h2>
         <p>The quiz you're trying to access is not available or has been removed.</p>
         <button onClick={() => navigate('/dashboard')} className="back-btn">
-          ← Back to Dashboard
+          Back to Dashboard
         </button>
       </div>
     );
@@ -2861,7 +2383,7 @@ export default function StudentQuizPage() {
       <div className="quiz-header">
         <div className="header-left">
           <button className="back-btn" onClick={() => navigate('/dashboard')}>
-            ← Back to Dashboard
+            Back to Dashboard
           </button>
           <div className="quiz-info">
             <h1 className="class-info">Class: {className}</h1>
@@ -2893,7 +2415,7 @@ export default function StudentQuizPage() {
             )}
           </div>
 
-          {/* ✅ UPDATED TIMER DISPLAY - SHOW SYNC STATUS */}
+          {/* Timer Display */}
           <div className="timer-section-student">
             <div className={`timer-display-student ${isTimerRunning ? 'running' : 'paused'}`}>
               {timeLeft !== null ? (
@@ -2987,7 +2509,7 @@ export default function StudentQuizPage() {
         onToggle={() => setShowAlertsPanel(!showAlertsPanel)}
       />
 
-      {/* ✅ TIMER DISPLAY WITH SYNC STATUS */}
+      {/* Timer Display */}
       <div className="quiz-progress">
         <div className="progress-info">
           <span className="progress-text">
@@ -3127,7 +2649,6 @@ export default function StudentQuizPage() {
             <span className="answered-count">
               {answeredCount} of {quiz.questions?.length || 0} questions answered
             </span>
-            {/* ✅ USE SYNCED TIMER FOR WARNINGS */}
             {timeLeft !== null && timeLeft < 300 && (
               <span className="time-warning">
                 ⚠️ {formatTime(timeLeft)} remaining
@@ -3161,19 +2682,11 @@ export default function StudentQuizPage() {
         />
       )}
 
-      {/* Camera Component for Exam Mode */}
+      {/* Camera Component for Exam Mode - REPLACED WITH StudentExamCamera */}
       {requiresCamera && permissionsGranted && (
-        <CameraComponent 
-          requiresCamera={requiresCamera}
-          onCameraStateChange={handleCameraStateChange}
-          onProctoringAlert={handleProctoringAlert}
+        <StudentExamCamera 
           examId={examId}
-          teacherDetectionSettings={teacherDetectionSettings}
-          socketRef={socketRef}
-          tabSwitchCount={tabSwitchCount}
-          windowBlurCount={windowBlurCount}
-          microphoneActive={!micState.isMuted}
-          isSpeaking={micState.isSpeaking}
+          isRequired={true}
         />
       )}
 

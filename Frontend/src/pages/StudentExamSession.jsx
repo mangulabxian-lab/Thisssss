@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+// StudentExamSession.jsx - COMPLETE FILE WITH CAMERA
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getQuizForStudent, submitQuizAnswers } from '../lib/api';
+import StudentExamCamera from '../components/StudentExamCamera';
 import './StudentQuizPage.css';
 
 // I-separate ang TextArea component sa labas
@@ -213,7 +215,7 @@ export default function StudentQuizPage() {
   };
 
   const handleBackToDashboard = () => {
-    navigate('/dashboard'); // Direct to dashboard instead of class page
+    navigate('/dashboard');
   };
 
   const handleReviewAnswers = () => {
@@ -288,7 +290,7 @@ export default function StudentQuizPage() {
             className="action-btn back-to-class-btn"
             onClick={handleBackToDashboard}
           >
-            ← Back to Dashboard
+            Back to Dashboard
           </button>
           <button 
             className="action-btn view-answers-btn"
@@ -307,6 +309,9 @@ export default function StudentQuizPage() {
 
     return (
       <div className="student-quiz-container">
+        {/* Add Camera Preview using StudentExamCamera component */}
+        <StudentExamCamera examId={examId} isRequired={true} />
+        
         <div className="quiz-header">
           {isReviewMode ? (
             <button 
@@ -320,7 +325,7 @@ export default function StudentQuizPage() {
               className="back-btn"
               onClick={handleBackToDashboard}
             >
-              ← Back to Dashboard
+              Back to Dashboard
             </button>
           )}
           
@@ -402,7 +407,7 @@ export default function StudentQuizPage() {
               className="action-btn back-to-class-btn"
               onClick={handleBackToDashboard}
             >
-              ← Back to Dashboard
+              Back to Dashboard
             </button>
           </div>
         )}
@@ -420,12 +425,14 @@ export default function StudentQuizPage() {
     handleAnswerChange, 
     handleSubmit, 
     handleBackToDashboard,
-    handleBackToResults
+    handleBackToResults,
+    examId
   ]);
 
   if (loading) {
     return (
       <div className="quiz-loading">
+        <StudentExamCamera examId={examId} isRequired={true} />
         <div className="loading-spinner"></div>
         <p>Loading quiz...</p>
       </div>
@@ -435,13 +442,14 @@ export default function StudentQuizPage() {
   if (error) {
     return (
       <div className="quiz-error">
+        <StudentExamCamera examId={examId} isRequired={true} />
         <h2>Error Loading Quiz</h2>
         <p>{error}</p>
         <button 
           onClick={handleBackToDashboard}
           className="back-btn"
         >
-          ← Back to Dashboard
+          Back to Dashboard
         </button>
       </div>
     );
@@ -450,13 +458,14 @@ export default function StudentQuizPage() {
   if (!quiz) {
     return (
       <div className="quiz-error">
+        <StudentExamCamera examId={examId} isRequired={true} />
         <h2>Quiz Not Found</h2>
         <p>The requested quiz could not be found.</p>
         <button 
           onClick={handleBackToDashboard}
           className="back-btn"
         >
-          ← Back to Dashboard
+          Back to Dashboard
         </button>
       </div>
     );

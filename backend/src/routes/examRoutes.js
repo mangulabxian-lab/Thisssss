@@ -249,7 +249,7 @@ router.get("/:examId/violation-details/:studentId", async (req, res) => {
     // Get completion data
     const completion = exam.completedBy.find(c => {
       const compStudentId = c.studentId?._id || c.studentId;
-      return compStudentId && compStudentId.toString() === studentId;
+      return compStudentId && compStudentId.toString() === studentId.toString();
     });
 
     res.json({
@@ -1574,7 +1574,7 @@ router.post("/:examId/submit", async (req, res) => {
 
 // ===== EXISTING QUIZ CREATION ROUTES =====
 
-// ✅ CREATE QUIZ - UPDATED WITH EXAM TYPE
+// ✅ CREATE QUIZ - UPDATED TO FORCE LIVE-CLASS TYPE
 router.post("/create/:classId", async (req, res) => {
   try {
     const { classId } = req.params;
@@ -1586,9 +1586,9 @@ router.post("/create/:classId", async (req, res) => {
       theme, 
       isPublished, 
       totalPoints,
-      examType = 'asynchronous', // ✅ ADDED DEFAULT
-      timeLimit = 60, // ✅ ADDED DEFAULT
-      isLiveClass = false, // ✅ ADDED DEFAULT
+      examType = 'live-class', // ✅ FORCE LIVE-CLASS TYPE
+      timeLimit = 0, // ✅ NO TIME LIMIT FOR LIVE CLASS
+      isLiveClass = true, // ✅ FORCE LIVE CLASS FLAG
       timerSettings = {}
     } = req.body;
 
@@ -1624,7 +1624,7 @@ router.post("/create/:classId", async (req, res) => {
       });
     }
 
-    // Create new exam/quiz with exam type
+    // Create new exam/quiz with live-class type
     const newExam = new Exam({
       title,
       description: description || "Form description",
@@ -1633,16 +1633,15 @@ router.post("/create/:classId", async (req, res) => {
       questions: questions || [],
       totalPoints: totalPoints || 0,
       isQuiz: true,
-      examType: examType, // ✅ SAVE EXAM TYPE
-      timeLimit: examType === 'live-class' ? 0 : timeLimit, // ✅ SET TIME LIMIT
-      isLiveClass: examType === 'live-class',
+      examType: 'live-class', // ✅ FORCE LIVE-CLASS TYPE
+      timeLimit: 0, // ✅ NO TIME LIMIT FOR LIVE CLASS
+      isLiveClass: true, // ✅ SET LIVE CLASS FLAG
       timerSettings: timerSettings || { // ✅ SAVE TIMER SETTINGS
         hours: 0,
-        minutes: timeLimit || 60,
+        minutes: 0,
         seconds: 0,
-        totalSeconds: (timeLimit || 60) * 60
+        totalSeconds: 0
       },
-         // ✅ SET LIVE CLASS FLAG
       isPublished: isPublished || false,
       settings: settings || {
         collectEmails: false,
@@ -1669,7 +1668,7 @@ router.post("/create/:classId", async (req, res) => {
       { $addToSet: { exams: savedExam._id } }
     );
 
-    console.log("✅ Quiz created successfully:", savedExam._id, "Type:", examType);
+    console.log("✅ Quiz created successfully:", savedExam._id, "Type: live-class (forced)");
 
     res.status(201).json({
       success: true,
@@ -1743,18 +1742,21 @@ router.put("/:examId/quiz-questions", async (req, res) => {
     if (settings !== undefined) updateData.settings = settings;
     if (theme !== undefined) updateData.theme = theme;
     if (totalPoints !== undefined) updateData.totalPoints = totalPoints;
+    
+    // ✅ UPDATED: Force live-class type when updating
     if (examType !== undefined) {
-      updateData.examType = examType;
+      updateData.examType = examType === 'live-class' ? 'live-class' : exam.examType;
       updateData.isLiveClass = examType === 'live-class';
       if (examType === 'live-class') {
         updateData.timeLimit = 0;
-      } else if (timeLimit !== undefined) {
-        updateData.timeLimit = timeLimit;
       }
     }
-    if (timeLimit !== undefined && (!examType || examType !== 'live-class')) {
+    
+    // ✅ UPDATED: Handle timeLimit for live-class
+    if (timeLimit !== undefined && exam.examType !== 'live-class') {
       updateData.timeLimit = timeLimit;
     }
+    
     if (isLiveClass !== undefined) updateData.isLiveClass = isLiveClass;
     
     // ✅ ADDED: Handle scheduledAt field
@@ -2390,90 +2392,6 @@ router.get("/health", (req, res) => {
   });
 });
 
-// ===== ASYNC EXAM TIMER MANAGEMENT =====
-// Ilagay ito SA BABA bago ang module.exports
-
-router.post('/:examId/start-async-timer', async (req, res) => {
-  try {
-    const { examId } = req.params;
-    const { totalSeconds } = req.body;
-    
-    const exam = await Exam.findById(examId);
-    if (!exam) return res.status(404).json({ error: 'Exam not found' });
-    
-    // ✅ GUMAWA NG EXACT END TIME
-    const endsAt = new Date(Date.now() + (totalSeconds * 1000));
-    
-    exam.timerSettings = {
-      hours: Math.floor(totalSeconds / 3600),
-      minutes: Math.floor((totalSeconds % 3600) / 60),
-      seconds: totalSeconds % 60,
-      totalSeconds: totalSeconds,
-      startedAt: new Date(),
-      endsAt: endsAt,
-      isRunning: true
-    };
-    
-    await exam.save();
-    
-    res.json({ 
-      success: true, 
-      message: 'Async timer started',
-      endsAt: endsAt.toISOString(),
-      totalSeconds: totalSeconds
-    });
-    
-  } catch (error) {
-    console.error('Error starting async timer:', error);
-    res.status(500).json({ error: 'Failed to start timer' });
-  }
-});
-
-router.get('/:examId/check-time', async (req, res) => {
-  try {
-    const { examId } = req.params;
-    const exam = await Exam.findById(examId);
-    
-    if (!exam || !exam.timerSettings || !exam.timerSettings.endsAt) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Timer not found or not started',
-        shouldStart: true
-      });
-    }
-    
-    const now = new Date();
-    const endsAt = new Date(exam.timerSettings.endsAt);
-    
-    // ✅ KUNG NAG-END NA, AUTOMATIC NA MAG-END
-    if (now >= endsAt) {
-      return res.json({
-        success: true,
-        remainingSeconds: 0,
-        endsAt: endsAt,
-        isRunning: false,
-        examEnded: true,
-        totalSeconds: exam.timerSettings.totalSeconds
-      });
-    }
-    
-    const remainingSeconds = Math.max(0, Math.floor((endsAt - now) / 1000));
-    
-    res.json({
-      success: true,
-      remainingSeconds: remainingSeconds,
-      endsAt: endsAt,
-      isRunning: remainingSeconds > 0,
-      examEnded: false,
-      totalSeconds: exam.timerSettings.totalSeconds
-    });
-    
-  } catch (error) {
-    console.error('Error checking time:', error);
-    res.status(500).json({ error: 'Failed to check time' });
-  }
-});
-
 // ✅ ADD ROUTE TO GET EXAM TYPE
 router.get('/:examId/type', async (req, res) => {
   try {
@@ -2486,9 +2404,9 @@ router.get('/:examId/type', async (req, res) => {
     
     res.json({
       success: true,
-      examType: exam.examType || 'asynchronous',
+      examType: exam.examType || 'live-class', // ✅ DEFAULT TO LIVE-CLASS
       timerSettings: exam.timerSettings || null,
-      timeLimit: exam.timeLimit || 60
+      timeLimit: exam.timeLimit || 0 // ✅ DEFAULT TO 0 FOR LIVE-CLASS
     });
   } catch (error) {
     console.error('Error getting exam type:', error);
@@ -2679,6 +2597,188 @@ router.get("/:classId/export-grades", async (req, res) => {
       success: false,
       message: "Failed to export grades",
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// ===== PENDING EXAMS ROUTES =====
+
+// ✅ GET PENDING EXAMS FOR STUDENT IN ALL CLASSES - UPDATED FOR LIVE-CLASS ONLY
+router.get("/student/pending-exams", async (req, res) => {
+  try {
+    const studentId = req.user.id;
+
+    console.log("📋 GETTING PENDING EXAMS FOR STUDENT:", studentId);
+
+    // 1. Get all classes the student is enrolled in
+    const studentClasses = await Class.find({
+      'members.userId': studentId,
+      'members.role': 'student'
+    });
+
+    console.log("✅ Found classes:", studentClasses.length);
+
+    // 2. For each class, find pending exams
+    const classesWithPendingExams = await Promise.all(
+      studentClasses.map(async (classItem) => {
+        // Find all exams in this class
+        const exams = await Exam.find({
+          classId: classItem._id,
+          $or: [
+            { isPublished: true },
+            { isDeployed: true },
+            { status: 'published' }
+          ],
+          $or: [
+            { endDate: { $gt: new Date() } },
+            { endDate: null },
+            { endDate: { $exists: false } }
+          ]
+        }).select('title examType isLiveClass timeLimit isActive isDeployed isPublished completedBy scheduledAt createdAt');
+
+        // ✅ UPDATED: Filter exams student hasn't completed - ONLY LIVE CLASSES
+        const pendingExams = await Promise.all(
+          exams.map(async (exam) => {
+            const hasCompleted = exam.completedBy?.some(completion => {
+              const compStudentId = completion.studentId?._id || completion.studentId;
+              return compStudentId && compStudentId.toString() === studentId.toString();
+            });
+
+            if (!hasCompleted) {
+              // ✅ ONLY SHOW LIVE CLASSES
+              if (exam.examType === 'live-class') {
+                if (exam.isActive) {
+                  return {
+                    examId: exam._id,
+                    title: exam.title,
+                    examType: exam.examType,
+                    isLiveClass: true,
+                    isActive: true,
+                    type: 'live',
+                    status: 'active',
+                    timeLimit: exam.timeLimit || 0,
+                    classId: classItem._id,
+                    className: classItem.name,
+                    classCode: classItem.code,
+                    scheduledAt: exam.scheduledAt,
+                    createdAt: exam.createdAt
+                  };
+                }
+                return null; // Live class not active
+              }
+              // ❌ Don't show asynchronous quizzes
+            }
+            return null; // Already completed or not available
+          })
+        ).then(results => results.filter(exam => exam !== null));
+
+        return {
+          classId: classItem._id,
+          className: classItem.name,
+          classCode: classItem.code,
+          pendingCount: pendingExams.length,
+          pendingExams: pendingExams
+        };
+      })
+    );
+
+    // Filter out classes with no pending exams
+    const filteredClasses = classesWithPendingExams.filter(cls => cls.pendingCount > 0);
+
+    console.log("✅ Pending exams data prepared:", filteredClasses.length, "classes have pending exams");
+
+    res.json({
+      success: true,
+      data: filteredClasses,
+      totalPending: filteredClasses.reduce((sum, cls) => sum + cls.pendingCount, 0)
+    });
+
+  } catch (err) {
+    console.error("❌ Get pending exams error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch pending exams"
+    });
+  }
+});
+
+// ✅ GET PENDING EXAMS FOR SPECIFIC CLASS - UPDATED FOR LIVE-CLASS ONLY
+router.get("/:classId/pending-exams", async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const studentId = req.user.id;
+
+    console.log("📋 GETTING PENDING EXAMS FOR CLASS:", { classId, studentId });
+
+    // Check if student is in this class
+    const classItem = await Class.findOne({
+      _id: classId,
+      'members.userId': studentId,
+      'members.role': 'student'
+    });
+
+    if (!classItem) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not enrolled in this class"
+      });
+    }
+
+    // Find all exams in this class
+    const exams = await Exam.find({
+      classId: classId,
+      $or: [
+        { isPublished: true },
+        { isDeployed: true },
+        { status: 'published' }
+      ]
+    }).select('title examType isLiveClass timeLimit isActive isDeployed isPublished completedBy scheduledAt createdAt');
+
+    // ✅ UPDATED: Filter pending exams - ONLY LIVE CLASSES
+    const pendingExams = await Promise.all(
+      exams.map(async (exam) => {
+        const hasCompleted = exam.completedBy?.some(completion => {
+          const compStudentId = completion.studentId?._id || completion.studentId;
+          return compStudentId && compStudentId.toString() === studentId.toString();
+        });
+
+        if (!hasCompleted) {
+          // ✅ ONLY SHOW LIVE CLASSES
+          if (exam.examType === 'live-class') {
+            return exam.isActive ? {
+              examId: exam._id,
+              title: exam.title,
+              examType: exam.examType,
+              isLiveClass: true,
+              isActive: true,
+              type: 'live',
+              status: 'active',
+              timeLimit: exam.timeLimit || 0,
+              scheduledAt: exam.scheduledAt
+            } : null;
+          }
+          // ❌ Don't show asynchronous quizzes
+        }
+        return null;
+      })
+    ).then(results => results.filter(exam => exam !== null));
+
+    res.json({
+      success: true,
+      data: {
+        classId: classItem._id,
+        className: classItem.name,
+        classCode: classItem.code,
+        pendingCount: pendingExams.length,
+        pendingExams: pendingExams
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Get class pending exams error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch pending exams for class"
     });
   }
 });

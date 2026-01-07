@@ -585,8 +585,7 @@ export default function ToDoPage() {
                   ) : (
                     <div className="completed-assignments-list">
                       <div className="completed-header">
-                        <h3>Completed Work ({filteredAssignments.length})</h3>
-                        <p>All your finished exams and assignments</p>
+                      
                       </div>
                       {filteredAssignments.map((assignment, index) => (
                         <AssignmentCard

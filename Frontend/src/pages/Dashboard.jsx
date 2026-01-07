@@ -1,5 +1,5 @@
-// src/components/Dashboard.jsx - UPDATED WITH REAL-TIME LIVE CLASS SUPPORT
-import React, { useState, useEffect, useRef, useCallback } from "react"; // ✅ ADDED React import
+// src/pages/Dashboard.jsx - UPDATED WITH LIVE CLASSES ONLY
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPlus, FaHome, FaCalendarAlt, FaArchive, FaCog, FaSignOutAlt, FaBook, FaUserPlus, FaBars, FaChevronLeft, FaChevronRight, FaEdit, FaTrash, FaEllipsisV, FaChevronDown, FaEnvelope, FaUserMinus, FaVolumeMute, FaVolumeUp, FaSave, FaTimes, FaCheckCircle, FaClock, FaExclamationTriangle } from "react-icons/fa";
 import api, { 
@@ -9,31 +9,26 @@ import api, {
   joinExamSession
 } from "../lib/api";
 import "./Dashboard.css";
-import io from 'socket.io-client'; // ✅ ADDED: Import socket.io for real-time updates
-import * as XLSX from 'xlsx'; // ✅ ADDED: Import for Excel export
+import io from 'socket.io-client';
+import * as XLSX from 'xlsx';
 
-// ✅ ADDED: Import ViolationSummaryModal
+// ✅ ADDED: Import components from correct paths
 import ViolationSummaryModal from '../components/ViolationSummaryModal';
+import ClassCard from "../components/ClassCard";
+// ✅ ADDED: Import separated tab components from components folder
+import PeopleTab from '../components/PeopleTab';
+import GradesTab from '../components/GradesTab';
+
 
 // Utility function to format exam type display
 const getExamTypeDisplay = (exam) => {
-  if (exam.examType === 'live-class') {
-    return {
-      type: 'live',
-      label: '🎥 Live Class',
-      icon: '🎥',
-      color: 'bg-blue-100 text-blue-800 border border-blue-200'
-    };
-  } else {
-    // ✅ FIX: Use actual timeLimit from backend, not hardcoded 60
-    const timeLimit = exam.timeLimit || 60;
-    return {
-      type: 'async',
-      label: ` ${timeLimit} min`,
-      icon: '',
-      color: 'bg-green-100 text-green-800 border border-green-200'
-    };
-  }
+  // ✅ ALWAYS SHOW AS LIVE CLASS
+  return {
+    type: 'live',
+    label: '🎥 Live Class',
+    icon: '🎥',
+    color: 'bg-blue-100 text-blue-800 border border-blue-200'
+  };
 };
 
 // ✅ ADDED: Function to check live session status (polling backup)
@@ -49,44 +44,30 @@ const checkLiveSessionStatus = async (examId) => {
   return { isActive: false };
 };
 
-// ✅ UPDATED: Utility function to get appropriate action button with enhanced live class logic
+// ✅ UPDATED: Utility function to get appropriate action button - LIVE CLASSES ONLY
 const getExamActionButton = (exam, userRole, userId) => {
-  const examType = exam.examType || 'asynchronous';
-  const isLiveClass = exam.isLiveClass || false;
+  // ✅ ALL EXAMS ARE NOW LIVE CLASSES
+  const isLiveClass = true; // Always true now
   
   if (userRole === 'teacher') {
-    if (examType === 'live-class' || isLiveClass) {
-      if (exam.isActive) {
-        return {
-          label: 'Manage Class',
-          variant: 'live-active',
-          icon: '🎥',
-          action: 'manage-live-class'
-        };
-      } else {
-        return {
-          label: 'Start Class',
-          variant: 'live',
-          icon: '🎥',
-          action: 'start-live-class'
-        };
-      }
+    // Teacher can only manage live classes
+    if (exam.isActive) {
+      return {
+        label: 'Manage Class',
+        variant: 'live-active',
+        icon: '🎥',
+        action: 'manage-live-class'
+      };
     } else {
-      // Teacher async quiz - no action button needed
-      return null;
+      return {
+        label: 'Start Class',
+        variant: 'live',
+        icon: '🎥',
+        action: 'start-live-class'
+      };
     }
   } else {
-    // ✅ STUDENT VIEW - CRITICAL FIX
-    console.log('👨‍🎓 Student checking exam:', {
-      title: exam.title,
-      examType: exam.examType,
-      isActive: exam.isActive,
-      isDeployed: exam.isDeployed,
-      isPublished: exam.isPublished,
-      completedBy: exam.completedBy
-    });
-    
-    // Check if student has already completed this exam
+    // Student view for live classes only
     const hasCompleted = exam.completedBy?.some(completion => 
       completion.studentId === userId
     );
@@ -100,51 +81,30 @@ const getExamActionButton = (exam, userRole, userId) => {
       };
     }
     
-    if (exam.examType === 'live-class' || exam.isLiveClass) {
-      // ✅ CHECK IF SESSION HAS ENDED
-      if (exam.endedAt && new Date(exam.endedAt) < new Date()) {
-        return {
-          label: 'Session Ended',
-          variant: 'disabled',
-          icon: '🛑',
-          action: 'none'
-        };
-      }
-      
-      if (exam.isActive) {
-        return {
-          label: 'Join Class',
-          variant: 'live',
-          icon: '🎥',
-          action: 'join-live-class'
-        };
-      } else {
-        return {
-          label: 'Not Started',
-          variant: 'disabled',
-          icon: '⏸️',
-          action: 'none'
-        };
-      }
+    // Check if live class has ended
+    if (exam.endedAt && new Date(exam.endedAt) < new Date()) {
+      return {
+        label: 'Session Ended',
+        variant: 'disabled',
+        icon: '🛑',
+        action: 'none'
+      };
+    }
+    
+    if (exam.isActive) {
+      return {
+        label: 'Join Class',
+        variant: 'live',
+        icon: '🎥',
+        action: 'join-live-class'
+      };
     } else {
-      // ✅ ASYNC QUIZ - Check if available for student
-      const isAvailable = exam.isDeployed || exam.isPublished || exam.isActive;
-      
-      if (isAvailable) {
-        return {
-          label: 'Start Quiz',
-          variant: 'primary',
-          icon: '📝',
-          action: 'start-quiz'
-        };
-      } else {
-        return {
-          label: 'Not Available',
-          variant: 'disabled',
-          icon: '🔒',
-          action: 'none'
-        };
-      }
+      return {
+        label: 'Not Started',
+        variant: 'disabled',
+        icon: '⏸️',
+        action: 'none'
+      };
     }
   }
 };
@@ -421,7 +381,7 @@ export default function Dashboard() {
     }
   };
 
-  // ✅ ADDED: Real-time socket connection for live classes
+  // ✅ ADDED: Real-time socket connection for live classes only
   useEffect(() => {
     if (!selectedClass || !selectedClass._id) return;
 
@@ -430,7 +390,7 @@ export default function Dashboard() {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('✅ Dashboard socket connected');
+      console.log('✅ Dashboard socket connected for live classes');
       
       // Join the class room for real-time updates
       socket.emit('join-class', { 
@@ -452,7 +412,7 @@ export default function Dashboard() {
               isActive: true,
               status: 'active',
               statusText: '🔴 LIVE Now',
-              examType: data.examType || 'live-class'
+              examType: 'live-class'
             }
           : item
       ));
@@ -467,22 +427,39 @@ export default function Dashboard() {
       }
     });
 
- socket.on('live-class-ended', (data) => {
-  console.log('🛑 Live class ended:', data);
-  
-  // ✅ Update ALL exams with this examId (not just current classwork)
-  setClasswork(prev => prev.map(item => 
-    item._id === data.examId 
-      ? { 
-          ...item, 
-          isActive: false,
-          endedAt: data.endedAt || new Date().toISOString(),
-          status: 'ended'
-        }
-      : item
-  ));
+    socket.on('live-class-ended', (data) => {
+      console.log('🛑 Live class ended:', data);
+      
+      // ✅ Update ALL exams with this examId (not just current classwork)
+      setClasswork(prev => prev.map(item => 
+        item._id === data.examId 
+          ? { 
+              ...item, 
+              isActive: false,
+              endedAt: data.endedAt || new Date().toISOString(),
+              status: 'ended'
+            }
+          : item
+      ));
 
-});
+      // Update quizCardsData if you're using it
+      if (setQuizCardsData) {
+        setQuizCardsData(prev => prev.map(quiz => 
+          quiz._id === data.examId 
+            ? { 
+                ...quiz, 
+                isActive: false, 
+                endedAt: data.endedAt,
+                examType: 'live-class' 
+              }
+            : quiz
+        ));
+      }
+      
+      // Show notification to user
+      alert(`🛑 Live class "${data.examTitle || 'Session'}" has ended`);
+    });
+
     // Listen for broadcast live class start (from teacher)
     socket.on('broadcast-live-class-start', (data) => {
       console.log('📢 Received broadcast live class start:', data);
@@ -544,7 +521,7 @@ export default function Dashboard() {
     
     const interval = setInterval(() => {
       classwork.forEach(async (item) => {
-        if ((item.examType === 'live-class' || item.isLiveClass) && !item.isActive) {
+        if (item.isLiveClass && !item.isActive) {
           try {
             const status = await checkLiveSessionStatus(item._id);
             if (status.isActive) {
@@ -578,21 +555,14 @@ export default function Dashboard() {
         ));
         
         // ✅ ALSO UPDATE QUIZ CARDS DATA
-  if (setQuizCardsData) {
-    setQuizCardsData(prev => prev.map(quiz => 
-      quiz._id === data.examId 
-        ? { 
-            ...quiz, 
-            isActive: false, 
-            endedAt: data.endedAt,
-            examType: 'live-class' 
-          }
-        : quiz
-    ));
-  }
-    // Show notification to user
-  alert(`🛑 Live class "${data.examTitle || 'Session'}" has ended`);
-
+        if (setQuizCardsData) {
+          setQuizCardsData(prev => prev.map(quiz => 
+            quiz._id === examId 
+              ? { ...quiz, isActive: true }
+              : quiz
+          ));
+        }
+        
         return true;
       }
     } catch (error) {
@@ -970,14 +940,6 @@ export default function Dashboard() {
     }
   };
 
-  const toggleActions = useCallback((personId, event) => {
-    if (event) {
-      event.stopPropagation();
-      event.preventDefault();
-    }
-    setActiveActions(activeActions === personId ? null : personId);
-  }, [activeActions]);
-
   const toggleStudentSelection = (studentId) => {
     setSelectedStudents(prev => 
       prev.includes(studentId) 
@@ -1021,44 +983,40 @@ export default function Dashboard() {
     }
   };
 
-  // ✅ UPDATED: QUIZ ACTION HANDLER WITH ENHANCED SOCKET SUPPORT =====
-  // ✅ UPDATED: QUIZ ACTION HANDLER WITH ENHANCED SOCKET SUPPORT
-const handleQuizAction = (exam) => {
-  const examTypeDisplay = getExamTypeDisplay(exam);
-  const actionButton = getExamActionButton(exam, selectedClass?.userRole, user._id);
-  
-  console.log('📱 Handling quiz action:', {
-    examId: exam._id,
-    examTitle: exam.title,
-    examType: exam.examType,
-    userRole: selectedClass?.userRole,
-    action: actionButton?.action,
-    isLiveClass: exam.examType === 'live-class',
-    isActive: exam.isActive,
-    isDeployed: exam.isDeployed
-  });
+  // ✅ UPDATED: QUIZ ACTION HANDLER WITH LIVE CLASSES ONLY
+  const handleQuizAction = (exam) => {
+    const examTypeDisplay = getExamTypeDisplay(exam);
+    const actionButton = getExamActionButton(exam, selectedClass?.userRole, user._id);
+    
+    console.log('📱 Handling quiz action:', {
+      examId: exam._id,
+      examTitle: exam.title,
+      examType: exam.examType,
+      userRole: selectedClass?.userRole,
+      action: actionButton?.action,
+      isLiveClass: exam.isLiveClass,
+      isActive: exam.isActive,
+      isDeployed: exam.isDeployed
+    });
 
-  if (!actionButton || actionButton.action === 'none') return;
+    if (!actionButton || actionButton.action === 'none') return;
 
-  if (selectedClass?.userRole === 'teacher') {
-    // Teacher actions remain the same
-    if (exam.examType === 'live-class') {
+    if (selectedClass?.userRole === 'teacher') {
+      // Teacher actions for live classes only
       if (exam.isActive) {
         navigate(`/teacher-exam/${exam._id}`);
       } else {
         navigate(`/teacher-exam/${exam._id}?action=start`);
       }
-    }
-  } else {
-    // Student actions
-    if (actionButton.action === 'review') {
-      // Navigate to review answers
-      navigate(`/review-exam/${exam._id}`);
-      return;
-    }
-    
-    if (exam.examType === 'live-class') {
-      // Live class logic remains the same
+    } else {
+      // Student actions - LIVE CLASSES ONLY
+      if (actionButton.action === 'review') {
+        // Navigate to review answers
+        navigate(`/review-exam/${exam._id}`);
+        return;
+      }
+      
+      // Only live class logic
       if (exam.isActive) {
         if (socketRef.current) {
           socketRef.current.emit('student-joining-live-class', {
@@ -1089,23 +1047,8 @@ const handleQuizAction = (exam) => {
           }
         });
       }
-    } else if (actionButton.action === 'start-quiz') {
-      // ✅ ASYNC QUIZ - Start the quiz
-      console.log('📝 Student starting async quiz:', exam._id);
-      navigate(`/student-quiz/${exam._id}`, {
-        state: {
-          requiresCamera: exam.isActive, // Only requires camera if active session
-          requiresMicrophone: false,
-          examTitle: exam.title,
-          className: selectedClass?.name || 'Class',
-          classId: selectedClass?._id,
-          isExamSession: exam.isActive,
-          timeLimit: exam.timeLimit || 60
-        }
-      });
     }
-  }
-};
+  };
 
   const handleStartQuiz = async (examId, examTitle) => {
     try {
@@ -1231,43 +1174,30 @@ const handleQuizAction = (exam) => {
     }
   };
 
-  // ✅ UPDATED: isQuizAvailableForStudent function
+  // ✅ UPDATED: isQuizAvailableForStudent function - LIVE CLASSES ONLY
   const isQuizAvailableForStudent = (item) => {
     if (!item) return false;
+    
     // ✅ CHECK IF LIVE CLASS HAS ENDED
-  if (item.examType === 'live-class') {
-    if (item.endedAt && new Date(item.endedAt) < new Date()) {
-      console.log('🛑 Live class has ended:', item.endedAt);
-      return false; // ❌ Class has ended, not available
+    if (item.isLiveClass) {
+      if (item.endedAt && new Date(item.endedAt) < new Date()) {
+        console.log('🛑 Live class has ended:', item.endedAt);
+        return false; // ❌ Class has ended, not available
+      }
     }
-  }
     
     console.log("📊 Checking quiz availability:", {
       title: item.title,
-      isPublished: item.isPublished,
-      isDeployed: item.isDeployed,
+      isLiveClass: item.isLiveClass,
       isActive: item.isActive,
-      isQuiz: item.isQuiz,
-      type: item.type,
-      examType: item.examType,
-      hasQuestions: item.questions?.length > 0
+      isDeployed: item.isDeployed,
+      endedAt: item.endedAt
     });
     
-    // For live classes, check if active
-    if (item.examType === 'live-class') {
-      return item.isActive || item.isDeployed;
-    }
-    
-    // For async quizzes, check if deployed/published
-    const isAvailable = 
-      item.isPublished || 
-      item.isDeployed ||
-      item.isActive ||
-      item.isQuiz ||
-      item.type === 'quiz' ||
-      (item.questions && item.questions.length > 0);
-    
-    return isAvailable;
+    // For live classes, check if active and not ended
+    return item.isLiveClass && 
+      (item.isActive || item.isDeployed) &&
+      !(item.endedAt && new Date(item.endedAt) < new Date());
   };
 
   const handleDeleteQuiz = async (quizId, quizTitle) => {
@@ -1878,84 +1808,80 @@ const handleQuizAction = (exam) => {
     }
   }, [selectedClass]);
 
-  // ✅ UPDATED: Function para kunin ang classwork
-// ✅ FIXED: UPDATED fetchClasswork function to avoid duplicates
-// ✅ FIXED: UPDATED fetchClasswork function
-const fetchClasswork = async () => {
-  if (!selectedClass) return;
-  
-  try {
-    console.log("📚 Fetching classwork for class:", selectedClass._id);
+  // ✅ UPDATED: fetchClasswork function - ALL EXAMS ARE LIVE CLASSES
+  const fetchClasswork = async () => {
+    if (!selectedClass) return;
     
-    // Fetch exams for this class
-    const examsRes = await api.get(`/exams/${selectedClass._id}`);
-    let examsData = [];
+    try {
+      console.log("📚 Fetching classwork for class:", selectedClass._id);
+      
+      // Fetch exams for this class
+      const examsRes = await api.get(`/exams/${selectedClass._id}`);
+      let examsData = [];
+      
+      if (examsRes.data?.data) {
+        examsData = Array.isArray(examsRes.data.data) ? examsRes.data.data : [];
+      } else if (examsRes.data) {
+        examsData = Array.isArray(examsRes.data) ? examsRes.data : [];
+      }
     
-    if (examsRes.data?.data) {
-      examsData = Array.isArray(examsRes.data.data) ? examsRes.data.data : [];
-    } else if (examsRes.data) {
-      examsData = Array.isArray(examsRes.data) ? examsRes.data : [];
-    }
-    
-    console.log("✅ Exams loaded from API:", examsData.length, "items");
-    
-    // Convert exams to classwork format
-    const classworkData = examsData.map(exam => {
-      // Check if student has completed this exam
-      const hasCompleted = exam.completedBy?.some(completion => {
-        const studentId = completion.studentId?._id || completion.studentId;
-        return studentId === user._id;
+      console.log("✅ Exams loaded from API:", examsData.length, "items");
+      
+      // Convert exams to classwork format - ALL EXAMS ARE LIVE CLASSES
+      const classworkData = examsData.map(exam => {
+        // Check if student has completed this exam
+        const hasCompleted = exam.completedBy?.some(completion => {
+          const studentId = completion.studentId?._id || completion.studentId;
+          return studentId === user._id;
+        });
+        
+        return {
+          _id: exam._id,
+          title: exam.title || 'Untitled Exam',
+          description: exam.description || '',
+          type: 'quiz',
+          isQuiz: true,
+          examType: 'live-class', // ✅ FORCED TO LIVE CLASS
+          isLiveClass: true, // ✅ ALWAYS TRUE
+          isActive: exam.isActive || false,
+          isDeployed: exam.isDeployed || false,
+          isPublished: exam.isPublished || false,
+          status: exam.status || 'draft',
+          timeLimit: exam.timeLimit || 60,
+          completedBy: exam.completedBy || [],
+          hasCompleted: hasCompleted,
+          createdAt: exam.createdAt,
+          createdBy: exam.createdBy,
+          scheduledDate: exam.scheduledAt ? new Date(exam.scheduledAt) : null,
+          postedAt: exam.createdAt ? new Date(exam.createdAt) : new Date(),
+          statusText: exam.isPublished ? 
+            `Posted ${new Date(exam.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 
+            'Draft'
+        };
       });
       
-      return {
-        _id: exam._id,
-        title: exam.title || 'Untitled Exam',
-        description: exam.description || '',
-        type: 'quiz',
-        isQuiz: true,
-        examType: exam.examType || 'asynchronous',
-        isLiveClass: exam.examType === 'live-class',
-        isActive: exam.isActive || false,
-        isDeployed: exam.isDeployed || false,
-        isPublished: exam.isPublished || false,
-        status: exam.status || 'draft',
-        timeLimit: exam.timeLimit || 60,
-        completedBy: exam.completedBy || [],
-        hasCompleted: hasCompleted,
-        createdAt: exam.createdAt,
-        createdBy: exam.createdBy,
-        scheduledDate: exam.scheduledAt ? new Date(exam.scheduledAt) : null,
-        postedAt: exam.createdAt ? new Date(exam.createdAt) : new Date(),
-        statusText: exam.isPublished ? 
-          `Posted ${new Date(exam.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 
-          'Draft'
-      };
-    });
-    
-    console.log("✅ Classwork processed:", classworkData);
-    setClasswork(classworkData);
-  } catch (error) {
-    console.error("❌ Failed to fetch classwork:", error);
-    setClasswork([]);
-  }
-};
-
-
-
-// ✅ ADDED: Effect to refresh classwork when returning from quiz deployment
-useEffect(() => {
-  const handleNavigationState = () => {
-    if (location.state?.refresh) {
-      console.log("🔄 Refreshing classwork from navigation state");
-      fetchClasswork();
-      
-      // Clear the state to prevent infinite refreshes
-      window.history.replaceState({}, document.title);
+      console.log("✅ Classwork processed:", classworkData);
+      setClasswork(classworkData);
+    } catch (error) {
+      console.error("❌ Failed to fetch classwork:", error);
+      setClasswork([]);
     }
   };
-  
-  handleNavigationState();
-}, [location.state]);
+
+  // ✅ ADDED: Effect to refresh classwork when returning from quiz deployment
+  useEffect(() => {
+    const handleNavigationState = () => {
+      if (location.state?.refresh) {
+        console.log("🔄 Refreshing classwork from navigation state");
+        fetchClasswork();
+        
+        // Clear the state to prevent infinite refreshes
+        window.history.replaceState({}, document.title);
+      }
+    };
+    
+    handleNavigationState();
+  }, [location.state]);
 
   // Function para gumawa ng announcement
   const createAnnouncement = useCallback(async (e) => {
@@ -2200,7 +2126,7 @@ useEffect(() => {
   };
 
   // ===== CLASS CREATION =====
-  const createClass = async (e) => {
+  const createClass = useCallback(async (e) => {
     e.preventDefault();
     try {
       const res = await api.post("/class", { name: className });
@@ -2212,7 +2138,7 @@ useEffect(() => {
     } catch (error) {
       alert(error.response?.data?.message || "Failed to create class");
     }
-  };
+  }, [className, classes]);
 
   const handleSelectClass = async (classData) => {
     console.log(" Selecting class:", classData.name);
@@ -2240,8 +2166,9 @@ useEffect(() => {
   };
 
   const getRandomColor = () => {
-    const colors = ['blue', 'red', 'green'];
-    return colors[Math.floor(Math.random() * colors.length)];
+    const colors = ['blue', 'green', 'yellow', 'red', 'purple', 'teal'];
+    const colorIndex = Math.floor(Math.random() * colors.length);
+    return colors[colorIndex];
   };
 
   // ===== COMPLETED EXAMS RENDERER =====
@@ -2292,427 +2219,6 @@ useEffect(() => {
       </div>
     );
   };
-
-  // ===== LEVEL 2: EXAM DETAILS (teacher) =====
-  const renderExamDetails = () => {
-    const { exams, students, examStats } = gradesData;
-    const exam = exams.find(e => e._id === selectedExamId);
-    const examStat = examStats.find(e => e.examId === selectedExamId);
-
-    if (!exam) {
-      return (
-        <div className="grades-tab">
-          <button
-            className="grades-back-btn"
-            onClick={() => {
-              setGradesView("overview");
-              setSelectedExamId(null);
-            }}
-          >
-            ← Back to grades overview
-          </button>
-          <div className="grades-empty">
-            <h3>Exam not found</h3>
-            <p>The selected quiz or exam could not be loaded.</p>
-          </div>
-        </div>
-      );
-    }
-
-    const submissions = exam.completedBy || [];
-
-    // map each student to their submission status
-    const rows = (students || []).map(student => {
-      const sub = submissions.find(s => {
-        const id = (s.studentId && s.studentId._id) || s.studentId;
-        return id && id.toString() === student._id;
-      });
-
-      let scoreDisplay = "-";
-      let pctDisplay = "-";
-      let status = "Not submitted";
-      let completedAtDisplay = "-";
-
-      if (sub) {
-        const maxScore = sub.maxScore || exam.totalPoints || 0;
-        const score = sub.score ?? null;
-        let pct = sub.percentage;
-        if ((pct === undefined || pct === null) && maxScore > 0 && score != null) {
-          pct = (score / maxScore) * 100;
-        }
-
-        scoreDisplay =
-          score != null && maxScore
-            ? `${score}/${maxScore}`
-            : score != null
-            ? score
-            : "-";
-        pctDisplay = pct != null ? `${pct.toFixed(1)}%` : "-";
-        status = "Completed";
-        completedAtDisplay = sub.completedAt
-          ? new Date(sub.completedAt).toLocaleString()
-          : "-";
-      }
-
-      return {
-        studentId: student._id,
-        name: student.name || student.email,
-        email: student.email,
-        scoreDisplay,
-        pctDisplay,
-        status,
-        completedAtDisplay
-      };
-    });
-
-    return (
-      <div className="grades-tab">
-        <button
-          className="grades-back-btn"
-          onClick={() => {
-            setGradesView("overview");
-            setSelectedExamId(null);
-          }}
-        >
-          ← Back to grades overview
-        </button>
-
-        <div className="grades-header">
-          <h3>{exam.title || "Quiz / exam details"}</h3>
-          <p>
-            Scores for each student in this activity.
-            {examStat && examStat.average != null && (
-              <> &nbsp;Class average: {examStat.average.toFixed(1)}%.</>
-            )}
-          </p>
-        </div>
-
-        <div className="grades-section">
-          <table className="grades-table">
-            <thead>
-              <tr>
-                <th>Student</th>
-                <th>Email</th>
-                <th>Score</th>
-                <th>%</th>
-                <th>Status</th>
-                <th>Completed at</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(row => (
-                <tr
-                  key={row.studentId}
-                  className="grades-row-clickable"
-                  onClick={() => {
-                    setSelectedStudentId(row.studentId);
-                    setGradesView("student");
-                  }}
-                >
-                  <td>{row.name}</td>
-                  <td>{row.email}</td>
-                  <td>{row.scoreDisplay}</td>
-                  <td>{row.pctDisplay}</td>
-                  <td>{row.status}</td>
-                  <td>{row.completedAtDisplay}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
-
-  // ===== LEVEL 3: STUDENT DETAILS (teacher) =====
-  const renderStudentDetails = () => {
-    const { studentStats, students } = gradesData;
-    const stat = studentStats.find(s => s.studentId === selectedStudentId);
-    const student = (students || []).find(s => s._id === selectedStudentId);
-
-    if (!stat) {
-      return (
-        <div className="grades-tab">
-          <button
-            className="grades-back-btn"
-            onClick={() => {
-              setGradesView("overview");
-              setSelectedStudentId(null);
-            }}
-          >
-            ← Back to grades overview
-          </button>
-          <div className="grades-empty">
-            <h3>No grade history</h3>
-            <p>This student has not completed any quizzes or exams yet.</p>
-          </div>
-        </div>
-      );
-    }
-
-    const displayName =
-      (student && (student.name || student.email)) || stat.name || "Student";
-
-    return (
-      <div className="grades-tab">
-        <button
-          className="grades-back-btn"
-          onClick={() => {
-            setGradesView("overview");
-            setSelectedStudentId(null);
-          }}
-        >
-          ← Back to grades overview
-        </button>
-
-        <div className="grades-header">
-          <h3>{displayName} – grade history</h3>
-          <p>
-            Performance across all quizzes and exams in this class.
-          </p>
-        </div>
-
-        <div className="grades-summary-cards">
-          <div className="grade-card">
-            <h4>Exams taken</h4>
-            <p>{stat.examsTaken}</p>
-          </div>
-          <div className="grade-card">
-            <h4>Average score</h4>
-            <p>
-              {stat.average != null ? `${stat.average.toFixed(1)}%` : "—"}
-            </p>
-          </div>
-        </div>
-
-        <div className="grades-section">
-          <h4>By quiz / exam</h4>
-          <table className="grades-table">
-            <thead>
-              <tr>
-                <th>Quiz / Exam</th>
-                <th>Score</th>
-                <th>%</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stat.details.map(detail => (
-                <tr key={detail.examId}>
-                  <td>{detail.examTitle}</td>
-                  <td>
-                    {detail.score != null && detail.maxScore
-                      ? `${detail.score}/${detail.maxScore}`
-                      : detail.score != null
-                      ? detail.score
-                      : "-"}
-                  </td>
-                  <td>
-                    {detail.percentage != null
-                      ? `${detail.percentage.toFixed(1)}%`
-                      : "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
-
-// ===== GRADES TAB RENDERER =====
-const renderGradesTab = () => {
-  if (!selectedClass) return null;
-
-  // ---- STUDENT VIEW: personal gradebook ----
-  if (selectedClass.userRole === "student") {
-    // ... (keep existing student view code)
-  }
-
-  // ---- TEACHER VIEW ----
-  if (gradesLoading) {
-    return (
-      <div className="grades-tab">
-        <div className="loading">Loading grades.</div>
-      </div>
-    );
-  }
-
-  // LEVEL 2 / 3 detail views
-  if (gradesView === "exam" && selectedExamId) {
-    return renderExamDetails();
-  }
-
-  if (gradesView === "student" && selectedStudentId) {
-    return renderStudentDetails();
-  }
-
-  const { exams, students, examStats } = gradesData;
-
-  if (!exams || exams.length === 0 || !students || students.length === 0) {
-    return (
-      <div className="grades-tab">
-        <div className="grades-empty">
-          <h3>Grades</h3>
-          <p>
-            No grades yet. When students start submitting quizzes/exams, this
-            gradebook will show their scores.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // Prepare student data with exam scores
-  const studentRows = students.map(student => {
-    const examScores = {};
-    exams.forEach(exam => {
-      const submissions = exam.completedBy || [];
-      const submission = submissions.find(s => {
-        const id = (s.studentId && s.studentId._id) || s.studentId;
-        return id && id.toString() === student._id;
-      });
-      examScores[exam._id] = submission ? submission.score : null;
-    });
-    
-    return {
-      ...student,
-      examScores
-    };
-  });
-
-  return (
-    <div className="grades-tab">
-      <div className="grades-header">
-        <h3>Grades</h3>
-        <p>
-          Gradebook for this class. Click a quiz title or student name for
-          more details.
-        </p>
-      </div>
-
-      {/* Toolbar like Google Classroom */}
-      <div className="gradebook-toolbar">
-        <div className="gradebook-sort">
-          <button
-            type="button"
-            className="sort-by-btn"
-            onClick={() => setShowSortMenu((open) => !open)}
-          >
-            Sort by {gradeSortBy === "lastName" ? "last name" : "first name"} ▾
-          </button>
-
-          {showSortMenu && (
-            <div className="sort-menu">
-              <button
-                type="button"
-                className="sort-menu-item"
-                onClick={() => {
-                  setGradeSortBy("lastName");
-                  setShowSortMenu(false);
-                }}
-              >
-                Sort by last name
-              </button>
-              <button
-                type="button"
-                className="sort-menu-item"
-                onClick={() => {
-                  setGradeSortBy("firstName");
-                  setShowSortMenu(false);
-                }}
-              >
-                Sort by first name
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Export Button */}
-        <button
-          className="export-grades-btn"
-          onClick={exportGradesToExcel}
-          title="Export grades to Excel"
-        >
-          <svg className="export-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          Export to Excel
-        </button>
-
-        {gradesData.overall && (
-          <div className="gradebook-overall">
-            Class average:&nbsp;
-            <strong>{gradesData.overall.average.toFixed(1)}%</strong>
-          </div>
-        )}
-      </div>
-
-      {/* FIXED: PROPER TABLE STRUCTURE - Using Table Instead of Grid for Better Alignment */}
-      <div className="grades-table-container">
-        <table className="grades-table-fixed">
-          <thead>
-            <tr>
-              <th className="grades-th students-th">Students</th>
-              {exams.map((exam) => (
-                <th key={exam._id} className="grades-th exam-th">
-                  {exam.title}
-                  <div className="exam-points">out of {exam.totalPoints}</div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {/* Class Average Row - This should be FIRST */}
-            <tr className="class-average-row">
-              <td className="grades-td average-label">Class average</td>
-              {examStats.map((exam) => (
-                <td key={exam.examId} className="grades-td average-value">
-                  {exam.average ? `${exam.average.toFixed(1)}%` : '—'}
-                </td>
-              ))}
-            </tr>
-            
-            {/* Student Rows */}
-            {studentRows.map((student) => (
-              <tr key={student._id} className="student-row">
-                <td className="grades-td student-info-cell">
-                  <div className="student-info-wrapper">
-                    <img 
-                      src={student.profileImage || `https://ui-avatars.com/api/?name=${encodeURIComponent(student.name || student.email)}&background=4285f4&color=fff`}
-                      className="student-avatar"
-                      alt={student.name || student.email}
-                    />
-                    <div className="student-name-email">
-                      <div className="student-name">{student.name || student.email}</div>
-                      <div className="student-email">{student.email}</div>
-                    </div>
-                  </div>
-                </td>
-                {exams.map((exam) => {
-                  const score = student.examScores[exam._id];
-                  return (
-                    <td key={exam._id} className="grades-td score-cell">
-                      {score == null ? (
-                        <span className="grade-missing">Missing</span>
-                      ) : (
-                        <span className="grade-score">
-                          {score}/{exam.totalPoints}
-                        </span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
-
-       
 
   // ===== TO DO TAB RENDERER =====
   const renderToDoTab = () => {
@@ -2959,8 +2465,7 @@ const renderGradesTab = () => {
               ) : (
                 <div className="completed-assignments-list">
                   <div className="completed-header">
-                    <h3>Completed Work ({filteredAssignments.length})</h3>
-                    <p>All your finished exams and assignments</p>
+                   
                   </div>
                   {filteredAssignments.map((assignment, index) => (
                     <AssignmentCard
@@ -3011,9 +2516,31 @@ const renderGradesTab = () => {
     );
   };
 
-  // ===== SETTINGS MODAL COMPONENT =====
+  // ✅ FIXED: SettingsModal Component
   const SettingsModal = () => {
     if (!showSettingsModal) return null;
+
+    const nameInputRef = useRef(null);
+    const emailInputRef = useRef(null);
+
+    // ✅ FIXED: Use useEffect properly
+    useEffect(() => {
+      if (showSettingsModal) {
+        // Small delay to ensure modal is rendered
+        setTimeout(() => {
+          nameInputRef.current?.focus();
+        }, 100);
+      }
+    }, [showSettingsModal]);
+
+    // ✅ FIXED: Prevent event bubbling
+    const handleInputFocus = (e) => {
+      e.stopPropagation();
+    };
+
+    const handleInputBlur = (e) => {
+      e.stopPropagation();
+    };
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -3057,17 +2584,23 @@ const renderGradesTab = () => {
                 </div>
               </div>
 
-              {/* Name and Email */}
+              {/* Name and Email - FIXED INPUTS */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Full Name
                   </label>
                   <input
+                    ref={nameInputRef}
                     type="text"
                     value={settingsData.name}
-                    onChange={(e) => handleSettingsInputChange('name', e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      handleSettingsInputChange('name', e.target.value);
+                    }}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 focus:outline-none"
                     placeholder="Enter your full name"
                   />
                 </div>
@@ -3076,10 +2609,16 @@ const renderGradesTab = () => {
                     Email Address
                   </label>
                   <input
+                    ref={emailInputRef}
                     type="email"
                     value={settingsData.email}
-                    onChange={(e) => handleSettingsInputChange('email', e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      handleSettingsInputChange('email', e.target.value);
+                    }}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 focus:outline-none"
                     placeholder="Enter your email"
                   />
                 </div>
@@ -3091,17 +2630,26 @@ const renderGradesTab = () => {
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Account Settings</h3>
               
               <div className="space-y-3">
-                <button className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                <button 
+                  className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onClick={() => alert("Change Password feature coming soon!")}
+                >
                   <p className="font-medium text-gray-900">Change Password</p>
                   <p className="text-sm text-gray-600">Update your password regularly</p>
                 </button>
                 
-                <button className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                <button 
+                  className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onClick={() => alert("Privacy Settings feature coming soon!")}
+                >
                   <p className="font-medium text-gray-900">Privacy Settings</p>
                   <p className="text-sm text-gray-600">Manage your privacy preferences</p>
                 </button>
                 
-                <button className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                <button 
+                  className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onClick={() => alert("Connected Accounts feature coming soon!")}
+                >
                   <p className="font-medium text-gray-900">Connected Accounts</p>
                   <p className="text-sm text-gray-600">Manage linked social accounts</p>
                 </button>
@@ -3112,14 +2660,14 @@ const renderGradesTab = () => {
           <div className="flex justify-end space-x-3 p-6 border-t border-gray-200 bg-gray-50">
             <button
               onClick={() => setShowSettingsModal(false)}
-              className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               Cancel
             </button>
             <button
               onClick={handleSaveSettings}
               disabled={savingSettings || !settingsData.name.trim() || !settingsData.email.trim()}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <FaSave className="w-4 h-4" />
               <span>{savingSettings ? "Saving..." : "Save Changes"}</span>
@@ -3224,67 +2772,67 @@ const renderGradesTab = () => {
     };
 
     const saveEditAnnouncement = async () => {
-    if (!localEditContent.trim()) {
-      console.log("❌ Empty content, not saving");
-      return;
-    }
-    
-    console.log("💾 SAVING EDIT - Button clicked!");
-    console.log("📦 Save Data:", {
-      announcementId: announcement._id,
-      newContent: localEditContent,
-      currentUserId,
-      canEditDelete
-    });
-    
-    setIsSavingEdit(true);
-    try {
-      const updateData = {
-        content: localEditContent.trim()
-      };
-      
-      console.log(" Calling updateAnnouncement API...");
-      const response = await updateAnnouncement(announcement._id, updateData);
-      console.log("✅ EDIT API RESPONSE RECEIVED:", response);
-
-      if (response.success) {
-        console.log("🔄 UPDATING ANNOUNCEMENTS STATE - Before update");
-        console.log("Current announcements count:", announcements.length);
-        
-        setAnnouncements(prev => {
-          const updated = prev.map(ann => 
-            ann._id === announcement._id 
-              ? { 
-                  ...ann, 
-                  content: localEditContent.trim(),
-                  updatedAt: new Date().toISOString()
-                }
-              : ann
-          );
-          console.log("🔄 After update - announcements:", updated);
-          return updated;
-        });
-
-        setIsEditing(false);
-        console.log("🎉 EDIT SUCCESSFUL - Editing mode closed");
-        alert("Announcement updated successfully!");
-      } else {
-        console.error("❌ EDIT FAILED - API returned false");
-        alert("Failed to update announcement: " + (response.message || "Unknown error"));
+      if (!localEditContent.trim()) {
+        console.log("❌ Empty content, not saving");
+        return;
       }
-    } catch (error) {
-      console.error("❌ EDIT ERROR:", error);
-      console.error("Error details:", {
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message
+      
+      console.log("💾 SAVING EDIT - Button clicked!");
+      console.log("📦 Save Data:", {
+        announcementId: announcement._id,
+        newContent: localEditContent,
+        currentUserId,
+        canEditDelete
       });
-      alert("Failed to edit announcement: " + (error.response?.data?.message || error.message));
-    } finally {
-      setIsSavingEdit(false);
-      console.log("🏁 Save process completed");
-    }
-  };
+      
+      setIsSavingEdit(true);
+      try {
+        const updateData = {
+          content: localEditContent.trim()
+        };
+        
+        console.log(" Calling updateAnnouncement API...");
+        const response = await updateAnnouncement(announcement._id, updateData);
+        console.log("✅ EDIT API RESPONSE RECEIVED:", response);
+
+        if (response.success) {
+          console.log("🔄 UPDATING ANNOUNCEMENTS STATE - Before update");
+          console.log("Current announcements count:", announcements.length);
+          
+          setAnnouncements(prev => {
+            const updated = prev.map(ann => 
+              ann._id === announcement._id 
+                ? { 
+                    ...ann, 
+                    content: localEditContent.trim(),
+                    updatedAt: new Date().toISOString()
+                  }
+                : ann
+            );
+            console.log("🔄 After update - announcements:", updated);
+            return updated;
+          });
+
+          setIsEditing(false);
+          console.log("🎉 EDIT SUCCESSFUL - Editing mode closed");
+          alert("Announcement updated successfully!");
+        } else {
+          console.error("❌ EDIT FAILED - API returned false");
+          alert("Failed to update announcement: " + (response.message || "Unknown error"));
+        }
+      } catch (error) {
+        console.error("❌ EDIT ERROR:", error);
+        console.error("Error details:", {
+          status: error.response?.status,
+          data: error.response?.data,
+          message: error.message
+        });
+        alert("Failed to edit announcement: " + (error.response?.data?.message || error.message));
+      } finally {
+        setIsSavingEdit(false);
+        console.log("🏁 Save process completed");
+      }
+    };
 
     const cancelEditAnnouncement = () => {
       console.log("❌ Canceling edit");
@@ -3523,16 +3071,16 @@ const renderGradesTab = () => {
                   Cancel
                 </button>
                 <button 
-  className="save-edit-btn"
-  onClick={(e) => {
-    console.log("🖱️ SAVE BUTTON CLICKED!");
-    e.stopPropagation();
-    saveEditAnnouncement();
-  }}
-  disabled={!localEditContent.trim() || isSavingEdit}
->
-  {isSavingEdit ? "Saving..." : "Save"}
-</button>
+                  className="save-edit-btn"
+                  onClick={(e) => {
+                    console.log("🖱️ SAVE BUTTON CLICKED!");
+                    e.stopPropagation();
+                    saveEditAnnouncement();
+                  }}
+                  disabled={!localEditContent.trim() || isSavingEdit}
+                >
+                  {isSavingEdit ? "Saving..." : "Save"}
+                </button>
               </div>
             </div>
           ) : (
@@ -3586,354 +3134,633 @@ const renderGradesTab = () => {
     );
   };
 
-  // ===== CLASS CARD COMPONENT =====
-  const ClassCard = ({ classData }) => {
-    const isTeacher = classData.userRole === "teacher";
-    
-    return (
-      <div 
-        key={classData._id} 
-        className="class-card bg-white rounded-lg shadow-md hover:shadow-lg transition-all duration-200 border border-gray-200 cursor-pointer relative overflow-visible"
-        onClick={() => handleSelectClass(classData)}
-      >
-        {/* ✅ CHAT BUTTON REMOVED */}
+  // ===== ENHANCED CLASSWORK TAB WITH LIVE CLASSES ONLY =====
+  const renderClassworkTab = () => {
+    const filteredClasswork = classwork.filter(item => {
+      if (selectedClass?.userRole === "student" && item.type === 'quiz') {
+        const hasCompleted = item.completedBy?.some(completion => 
+          completion.studentId === user._id
+        );
+        return !hasCompleted;
+      }
+      return true;
+    });
 
-        <div className="absolute top-3 right-3 z-50">
-          <button 
-            className="p-2 rounded-full hover:bg-gray-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white shadow-md border border-gray-200"
-            onClick={(e) => toggleMenu(classData._id, e)}
-          >
-            <svg className="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-            </svg>
-          </button>
-          
-          {showMenuForClass === classData._id && (
-            <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-50">
-              {isTeacher ? (
-                <>
-                  <button
-                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center space-x-2 transition-colors"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowMenuForClass(null);
-                    }}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                    <span>Edit class</span>
-                  </button>
-                  <button
-                    className="w-full text-left px-4 py-2 text-sm text-orange-600 hover:bg-orange-50 flex items-center space-x-2 transition-colors"
-                    onClick={(e) => confirmArchive(classData, e)}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                    </svg>
-                    <span>Archive class</span>
-                  </button>
-                  <hr className="my-1" />
-                  <button
-                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2 transition-colors"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowMenuForClass(null);
-                    }}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                    <span>Delete class</span>
-                  </button>
-                </>
-              ) : (
-                <button
-                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2 transition-colors"
-                  onClick={(e) => confirmUnenroll(classData, e)}
+    // ✅ UPDATED: Filter quizzes/exams from classwork - ALL ARE LIVE CLASSES
+    const displayExams = classwork
+      .filter(item => item.type === 'quiz' || item.isQuiz || item.examType || item._id?.startsWith('quiz'))
+      .map(item => {
+        // Ensure all exams are marked as live classes
+        const examData = {
+          _id: item._id,
+          title: item.title || 'Untitled Quiz',
+          description: item.description || '',
+          examType: 'live-class', // ✅ FORCED TO LIVE CLASS
+          isLiveClass: true, // ✅ ALWAYS TRUE
+          status: item.isPublished || item.isDeployed ? 'posted' : 'draft',
+          statusText: item.isPublished || item.isDeployed ? 
+            `Posted ${item.createdAt ? new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'recently'}` : 
+            'Draft',
+          type: 'quiz',
+          isActive: item.isActive || false,
+          isDeployed: item.isDeployed || false,
+          isPublished: item.isPublished || false,
+          completedBy: item.completedBy || [],
+          scheduledDate: item.scheduledAt ? new Date(item.scheduledAt) : null,
+          postedAt: item.createdAt ? new Date(item.createdAt) : new Date(),
+          isDemo: item._id?.startsWith('quiz') || item._id?.startsWith('demo-') || false,
+          timeLimit: item.timeLimit || 60
+        };
+        
+        console.log('📋 Processed exam data for display:', examData);
+        return examData;
+      });
+
+    const renderExamCard = (exam) => {
+      const examTypeDisplay = getExamTypeDisplay(exam);
+      const actionButton = getExamActionButton(exam, selectedClass?.userRole, user._id);
+      
+      // ✅ ADD THIS: Check if teacher can view summary (exam is completed/has submissions)
+      const canViewSummary = selectedClass?.userRole === "teacher" && 
+        (exam.completedBy?.length > 0 || exam.isActive === false);
+      
+      return (
+        <div key={exam._id} className="exam-card">
+          <div className="exam-card-header">
+            <div className="exam-icon-container">
+              <span className={`exam-type-badge ${examTypeDisplay.color}`}>
+                {examTypeDisplay.icon} {examTypeDisplay.label}
+              </span>
+            </div>
+            
+            <div className="exam-title-section">
+              <h3 className="exam-title">{exam.title}</h3>
+              {exam.description && (
+                <p className="exam-description">{exam.description}</p>
+              )}
+              <div className={`exam-status ${exam.status}`}>
+                {exam.statusText}
+              </div>
+            </div>
+            
+            {/* ✅ ADD THIS: VIOLATION SUMMARY BUTTON FOR TEACHERS */}
+            {selectedClass?.userRole === "teacher" && (
+              <div className="exam-actions-dropdown">
+                <button 
+                  className="exam-menu-btn"
+                  onClick={(e) => toggleQuizMenu(exam._id, e)}
+                  style={{
+                    position: 'absolute',
+                    top: '10px',
+                    right: '10px',
+                    zIndex: 10,
+                    background: 'white',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '4px',
+                    padding: '4px 8px',
+                    cursor: 'pointer'
+                  }}
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                  <span>Unenroll from class</span>
+                  <FaEllipsisV />
+                </button>
+                
+                {showQuizMenu === exam._id && (
+                  <div 
+                    className="exam-menu-dropdown"
+                    style={{
+                      position: 'absolute',
+                      top: '35px',
+                      right: '10px',
+                      zIndex: 20,
+                      background: 'white',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '6px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      minWidth: '180px'
+                    }}
+                  >
+                    {/* Edit Button */}
+                    <button 
+                      className="exam-menu-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditQuiz(exam);
+                      }}
+                    >
+                      <FaEdit className="menu-item-icon" />
+                      Edit
+                    </button>
+                    
+                    {/* VIOLATION SUMMARY BUTTON */}
+                    {canViewSummary && (
+                      <button 
+                        className="exam-menu-item"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewViolationSummary(exam);
+                          setShowQuizMenu(null);
+                        }}
+                      >
+                        <svg className="menu-item-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        View Detection Summary
+                      </button>
+                    )}
+                    
+                    {/* Live Class Controls */}
+                    {exam.isActive ? (
+                      <button 
+                        className="exam-menu-item"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEndExamSession(exam._id);
+                          setShowQuizMenu(null);
+                        }}
+                      >
+                        <span className="menu-item-icon">🛑</span>
+                        End Live Class
+                      </button>
+                    ) : (
+                      <button 
+                        className="exam-menu-item"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartExamSession(exam);
+                          setShowQuizMenu(null);
+                        }}
+                      >
+                        <span className="menu-item-icon">🚀</span>
+                        Start Live Class
+                      </button>
+                    )}
+                    
+                    {/* Delete Button */}
+                    <button 
+                      className="exam-menu-item delete"
+                      onClick={(e) => handleDeleteQuizClick(exam, e)}
+                    >
+                      <FaTrash className="menu-item-icon" />
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="exam-info">
+            <div className="exam-meta">
+              <span className="exam-type">Live Class</span>
+              <span className="exam-duration">
+                 {exam.timeLimit || 60} minutes
+              </span>
+              {exam.scheduledDate && (
+                <span className="exam-date">
+                  Starts: {exam.scheduledDate.toLocaleDateString()}
+                </span>
+              )}
+              {exam.isDemo && (
+                <span className="demo-badge">Demo</span>
+              )}
+              {exam.isActive && (
+                <span className="live-badge">🔴 LIVE</span>
+              )}
+              <span className={`exam-status ${exam.status}`}>
+                {exam.statusText || 
+                  (exam.isActive ? 'Session Active' : 
+                   exam.isDeployed ? 'Published' : 
+                   exam.status === 'draft' ? 'Draft' : 
+                   'Not Available')}
+              </span>
+            </div>
+            
+            {/* Action Button */}
+            <div className="exam-action-button">
+              {actionButton ? (
+                <button 
+                  className={`action-btn ${actionButton.variant} ${actionButton.action === 'none' ? 'disabled' : ''}`}
+                  onClick={() => {
+                    if (actionButton.action !== 'none') {
+                      handleQuizAction(exam);
+                    }
+                  }}
+                  disabled={actionButton.action === 'none'}
+                >
+                  <span className="action-icon">{actionButton.icon}</span>
+                  <span className="action-label">{actionButton.label}</span>
+                </button>
+              ) : (
+                // Teacher async quiz - no button or show "View" button
+                <div>
+                </div>
+              )}
+
+              {selectedClass?.userRole === "student" && actionButton?.action === 'review' && (
+                <button 
+                  className="review-btn secondary"
+                  onClick={() => navigate(`/review-exam/${exam._id}`)}
+                >
+                  📊 Review Answers
                 </button>
               )}
             </div>
-          )}
-        </div>
-
-        <div className="p-4">
-          <div className="flex justify-between items-start mb-3">
-            <h3 className="font-semibold text-lg text-gray-800 truncate flex-1 pr-12">{classData.name}</h3>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-              isTeacher 
-                ? 'bg-blue-100 text-blue-800 border border-blue-200' 
-                : 'bg-green-100 text-green-800 border border-green-200'
-            }`}>
-              {isTeacher ? "Teacher" : "Student"}
-            </span>
-          </div>
-          
-          <div className="space-y-2">
-            <p className="text-sm text-gray-600">
-              Class Code: <strong className="font-mono bg-gray-100 px-2 py-1 rounded border">{classData.code}</strong>
-            </p>
-            <p className="text-sm text-gray-600">
-              Owner: <span className="font-medium">{classData.ownerId?.name || "You"}</span>
-            </p>
-            <div className="flex justify-between text-xs text-gray-500 pt-2 border-t border-gray-100">
-              <span className="flex items-center bg-gray-50 px-2 py-1 rounded">
-                <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
-                </svg>
-                {classData.members?.length || 1} members
-              </span>
-              <span className="flex items-center bg-gray-50 px-2 py-1 rounded">
-                <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd"/>
-                </svg>
-                {classData.exams?.length || 0} exams
-              </span>
-            </div>
           </div>
         </div>
-      </div>
-    );
-  };
-
-  // ===== PEOPLE TAB RENDERER - FIXED =====
-  const renderPeopleTab = () => {
-    if (loadingPeople) {
-      return <div className="loading">Loading people...</div>;
-    }
-
-    console.log('👥 Rendering People Tab with data:', {
-      teachers: classPeople.teachers?.length || 0,
-      students: classPeople.students?.length || 0,
-      teachersWithProfiles: classPeople.teachers?.filter(t => t.profileImage).length || 0,
-      studentsWithProfiles: classPeople.students?.filter(s => s.profileImage).length || 0
-    });
+      );
+    };
 
     return (
-      <div className="people-tab">
-        <div className="people-header">
-          <h3>People</h3>
-          {isTeacher && classPeople.students && classPeople.students.length > 0 && (
-            <button 
-              className="email-students-btn"
-              onClick={() => setShowEmailModal(true)}
-            >
-              <FaEnvelope className="btn-icon" />
-              Email Students
-            </button>
-          )}
-        </div>
+      <div className="classwork-tab">
+        {/* Header Section */}
+        <div className="classwork-header-section">
+          <div className="classwork-header">
+            <div className="classwork-title">
+              <h2>Classwork</h2>
+            </div>
+            
+            {selectedClass?.userRole === "teacher" && (
+              <div className="classwork-actions">
+                <button 
+                  className="create-btn"
+                  onClick={() => {
+                    if (selectedClass) {
+                      navigate(`/class/${selectedClass._id}/quiz/new`);
+                    } else {
+                      alert('Please select a class first');
+                    }
+                  }}
+                >
+                  <FaPlus className="btn-icon" />
+                  Create Live Class
+                </button>
+              </div>
+            )}
+          </div>
 
-        {/* Teachers Section */}
-        <div className="people-section">
-          <h4 className="section-title">Teachers ({classPeople.teachers?.length || 0})</h4>
-          <div className="people-list">
-            {classPeople.teachers && classPeople.teachers.length > 0 ? (
-              classPeople.teachers.map(teacher => (
-                <div key={teacher._id} className="person-card teacher-card">
-                  <div className="person-avatar">
-                    {teacher.profileImage ? (
-                      <img 
-                        src={teacher.profileImage} 
-                        alt={teacher.name}
-                        className="avatar-image"
-                        onError={(e) => {
-                          e.target.style.display = 'none';
-                          const fallback = e.target.nextSibling;
-                          if (fallback) fallback.style.display = 'flex';
-                        }}
-                      />
-                    ) : null}
-                    <div className={`avatar-fallback ${teacher.profileImage ? 'hidden' : ''}`}>
-                      {teacher.name?.charAt(0)?.toUpperCase() || 'T'}
-                    </div>
-                  </div>
-                  <div className="person-info">
-                    <div className="person-name">{teacher.name}</div>
-                    <div className="person-role teacher-role">Teacher</div>
-                  </div>
-                </div>
-              ))
+          {/* Role Indicator */}
+          <div className="role-indicator">
+            {selectedClass?.userRole === "teacher" ? (
+              <div className="teacher-indicator">
+                👨‍🏫 You are viewing this class as a <strong>teacher</strong>.
+                {classwork.some(item => item.type === 'quiz' || item.isQuiz) && (
+                  <button 
+                    className="delete-all-quizzes-btn"
+                    onClick={handleDeleteAllQuizzes}
+                    disabled={deletingAll}
+                  >
+                    {deletingAll ? 'Deleting...' : 'Delete All Live Classes'}
+                  </button>
+                )}
+              </div>
             ) : (
-              <div className="no-teachers">
-                <p>No teachers found</p>
+              <div>
               </div>
             )}
           </div>
         </div>
 
-        {/* Students Section */}
-        <div className="people-section">
-          <div className="section-header">
-            <h4 className="section-title">Students ({classPeople.students?.length || 0})</h4>
-          </div>
-
-          {classPeople.students && classPeople.students.length > 0 ? (
-            <div className="students-container">
-              {/* Bulk Selection Header */}
-              {isTeacher && (
-                <div className="bulk-selection-header">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={selectedStudents.length === classPeople.students.length}
-                      onChange={selectAllStudents}
-                    />
-                    Select All
-                  </label>
-                  <span className="selected-count">
-                    {selectedStudents.length} selected
-                  </span>
-                </div>
-              )}
-
-              {/* Students List */}
-              <div className="people-list">
-                {classPeople.students.map(student => (
-                  <div key={student._id} className="person-card student-card">
-                    {isTeacher && (
-                      <div className="student-select">
-                        <input
-                          type="checkbox"
-                          checked={selectedStudents.includes(student._id)}
-                          onChange={() => toggleStudentSelection(student._id)}
-                        />
-                      </div>
-                    )}
-                    <div className="person-avatar">
-                      {student.profileImage ? (
-                        <img 
-                          src={student.profileImage} 
-                          alt={student.name}
-                          className="avatar-image"
-                          onError={(e) => {
-                            e.target.style.display = 'none';
-                            const fallback = e.target.nextSibling;
-                            if (fallback) fallback.style.display = 'flex';
-                          }}
-                        />
-                      ) : null}
-                      <div className={`avatar-fallback ${student.profileImage ? 'hidden' : ''}`}>
-                        {student.name?.charAt(0)?.toUpperCase() || 'S'}
-                      </div>
-                    </div>
-                    <div className="person-info">
-                      <div className="person-name">
-                        {student.name}
-                        {student.isMuted && <span className="muted-badge">Muted</span>}
-                      </div>
-                      
-                    </div>
-                    {isTeacher && (
-                      <div className="person-actions-container" ref={actionsDropdownRef}>
-                        <button 
-                          className="actions-toggle"
-                          onClick={(e) => toggleActions(student._id, e)}
-                        >
-                          <FaEllipsisV />
-                        </button>
-                        
-                        {activeActions === student._id && (
-                          <div className="actions-dropdown">
-                            <button 
-                              className="action-item"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleMute(student._id, student.name, student.isMuted);
-                                setActiveActions(null);
-                              }}
-                            >
-                              {student.isMuted ? <FaVolumeUp /> : <FaVolumeMute />}
-                              {student.isMuted ? 'Unmute' : 'Mute'} Student
-                            </button>
-                            <button 
-                              className="action-item remove"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRemoveStudent(student._id, student.name);
-                                setActiveActions(null);
-                              }}
-                            >
-                              <FaUserMinus />
-                              Remove from Class
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
+        {/* Exam Cards Grid - With Live Classes Only */}
+        <div className="exam-cards-grid">
+          {displayExams.length > 0 ? (
+            displayExams.map((exam) => renderExamCard(exam))
           ) : (
-            <div className="empty-state">
-              <div className="empty-icon">👥</div>
-              <h4>No Students Yet</h4>
-              <p>Students will appear here once they join your class using the class code.</p>
+            <div className="no-exams-message">
+              <div className="no-exams-icon">🎥</div>
+              <h3>No live classes yet</h3>
+              <p>
+                {selectedClass?.userRole === "teacher" 
+                  ? "Create a live class to get started. Your students will be able to join when you start the session."
+                  : "No live classes have been scheduled yet. Check back later or ask your teacher."}
+              </p>
             </div>
           )}
         </div>
 
-        {/* Email Modal */}
-        {showEmailModal && (
-          <div className="modal-overlay" style={{ zIndex: 10000 }}>
-            <div className="modal-content">
-              <div className="modal-header">
-                <h3>Email Students</h3>
-                <button 
-                  className="close-btn"
-                  onClick={() => setShowEmailModal(false)}
-                >
-                  ×
-                </button>
-              </div>
-              <div className="modal-body">
-                <p>Sending to {selectedStudents.length} selected students</p>
-                <div className="form-group">
-                  <label>Subject</label>
-                  <input
-                    type="text"
-                    placeholder="Enter email subject"
-                    value={emailData.subject}
-                    onChange={(e) => setEmailData(prev => ({ ...prev, subject: e.target.value }))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Message</label>
-                  <textarea
-                    placeholder="Enter your message"
-                    rows="6"
-                    value={emailData.message}
-                    onChange={(e) => setEmailData(prev => ({ ...prev, message: e.target.value }))}
-                  />
-                </div>
-              </div>
-              <div className="modal-actions">
-                <button 
-                  className="btn-secondary"
-                  onClick={() => setShowEmailModal(false)}
-                >
-                  Cancel
-                </button>
-                <button 
-                  className="btn-primary"
-                  onClick={handleEmailStudents}
-                  disabled={!emailData.subject.trim() || !emailData.message.trim()}
-                >
-                  Send Email
-                </button>
+        {/* Existing Classwork Content */}
+        <div className="classwork-content">
+          {filteredClasswork.length === 0 ? (
+            <div className="classwork-empty-state">
+              <div className="empty-illustration">
+
               </div>
             </div>
+          ) : (
+            <div className="classwork-grid">
+              {/* Your existing classwork items */}
+              {filteredClasswork.map((item) => (
+                <div>
+                  {/* Your existing classwork card content */}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {renderCompletedExams()}
+        </div>
+      </div>
+    );
+  };
+
+  // Home content renderer
+  const renderHomeContent = () => {
+    if (selectedClass) {
+      return (
+        <div className="class-details">
+          <div className="class-header">
+            <h2>{selectedClass.name}</h2>
+            <div className="class-info-grid">
+              <div className="class-info-item">
+                <span className="info-label">Class code:</span>
+                <span className="info-value">{selectedClass.code}</span>
+              </div>
+              <div className="class-info-item">
+                <span className="info-label">Your role:</span>
+                <span className={`info-value role ${selectedClass.userRole}`}>
+                  {selectedClass.userRole === "teacher" ? "Teacher" : "Student"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="classroom-tabs">
+            {selectedClass?.userRole === "teacher" && (
+              <>
+                <button 
+                  className={`classroom-tab ${activeTab === "classwork" ? "active" : ""}`}
+                  onClick={() => setActiveTab("classwork")}
+                >
+                  Classwork
+                </button>
+                <button 
+                  className={`classroom-tab ${activeTab === "people" ? "active" : ""}`}
+                  onClick={() => setActiveTab("people")}
+                >
+                  People
+                </button>
+                <button 
+                  className={`classroom-tab ${activeTab === "grades" ? "active" : ""}`}
+                  onClick={() => setActiveTab("grades")}
+                >
+                  Grades
+                </button>
+              </>
+            )}
+            
+            {selectedClass?.userRole === "student" && (
+              <>
+                <button 
+                  className={`classroom-tab ${activeTab === "classwork" ? "active" : ""}`}
+                  onClick={() => setActiveTab("classwork")}
+                >
+                  Stream
+                </button>
+                {/* ✅ ADD TO DO TAB FOR STUDENTS */}
+                <button 
+                  className={`classroom-tab ${activeTab === "todo" ? "active" : ""}`}
+                  onClick={() => setActiveTab("todo")}
+                >
+                  To do
+                </button>
+              </>
+            )}
+          </div>
+
+          {activeTab === "classwork" && renderClassworkTab()}
+
+          {/* ✅ UPDATED: Use PeopleTab component */}
+          {activeTab === "people" && (
+            <PeopleTab
+              classPeople={classPeople}
+              loadingPeople={loadingPeople}
+              selectedClass={selectedClass}
+              isTeacher={selectedClass?.userRole === "teacher"}
+              user={user}
+              api={api}
+              activeActions={activeActions}
+              setActiveActions={setActiveActions}
+              selectedStudents={selectedStudents}
+              setSelectedStudents={setSelectedStudents}
+              showEmailModal={showEmailModal}
+              setShowEmailModal={setShowEmailModal}
+              emailData={emailData}
+              setEmailData={setEmailData}
+              toggleStudentSelection={toggleStudentSelection}
+              selectAllStudents={selectAllStudents}
+              handleToggleMute={handleToggleMute}
+              handleRemoveStudent={handleRemoveStudent}
+              handleEmailStudents={handleEmailStudents}
+            />
+          )}
+
+          {/* ✅ TO DO TAB RENDERER */}
+          {activeTab === "todo" && renderToDoTab()}
+
+          {/* ✅ UPDATED: Use GradesTab component */}
+          {activeTab === "grades" && (
+            <GradesTab
+              selectedClass={selectedClass}
+              gradesLoading={gradesLoading}
+              gradesData={gradesData}
+              gradesView={gradesView}
+              setGradesView={setGradesView}
+              selectedExamId={selectedExamId}
+              setSelectedExamId={setSelectedExamId}
+              selectedStudentId={selectedStudentId}
+              setSelectedStudentId={setSelectedStudentId}
+              gradeSortBy={gradeSortBy}
+              setGradeSortBy={setGradeSortBy}
+              showSortMenu={showSortMenu}
+              setShowSortMenu={setShowSortMenu}
+              user={user}
+              api={api}
+              exportGradesToExcel={exportGradesToExcel}
+            />
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="home-view">
+        {allClasses.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-actions">
+              {userRole === "teacher" ? (
+                <button 
+                  className="primary-btn"
+                  onClick={() => setShowCreateModal(true)}
+                >
+                  <FaPlus className="btn-icon" />
+                  Create Your First Class
+                </button>
+              ) : (
+                <button 
+                  className="primary-btn"
+                  onClick={() => setShowJoinModal(true)}
+                >
+                  <FaUserPlus className="btn-icon" />
+                  Join a Class
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="class-grid">
+            {allClasses.map((classData) => (
+              <ClassCard
+                key={classData._id}
+                classData={classData}
+                handleSelectClass={handleSelectClass}
+                toggleMenu={toggleMenu}
+                showMenuForClass={showMenuForClass}
+                setShowMenuForClass={setShowMenuForClass}
+                confirmArchive={confirmArchive}
+                confirmUnenroll={confirmUnenroll}
+                userId={user._id} // ADD THIS LINE
+              />
+            ))}
           </div>
         )}
       </div>
     );
   };
+
+  // Calendar content renderer
+  const renderCalendarContent = () => (
+    <div className="calendar-view">
+      <div className="calendar-header">
+        <h2>Calendar</h2>
+        <p>View your scheduled exams and assignments</p>
+      </div>
+      <GoogleClassroomCalendar />
+    </div>
+  );
+
+  // Archived content renderer
+  const renderArchivedContent = () => (
+    <div className="archived-view">
+      <div className="archived-header">
+        <h2>Archived Classes</h2>
+      </div>
+
+      {archivedClasses.length === 0 ? (
+        <div className="archived-empty">
+          <h3>No archived classes</h3>
+          <p>When you archive classes, they'll appear here.</p>
+        </div>
+      ) : (
+        <div className="archived-classes-grid">
+          {archivedClasses.map((classData) => (
+            <div key={classData._id} className="archived-class-card">
+              <div className="archived-class-content">
+                <div className="archived-class-header">
+                  <h3 className="archived-class-name">{classData.name}</h3>
+                  <span className="archived-badge">Archived</span>
+                </div>
+                
+                <div className="archived-class-info">
+                  <p className="text-sm text-gray-600">
+                    Class Code: <strong className="font-mono">{classData.code}</strong>
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    Archived: {new Date(classData.archivedAt).toLocaleDateString()}
+                  </p>
+                  <div className="flex justify-between text-xs text-gray-500 pt-2">
+                    <span>{classData.members?.length || 1} members</span>
+                    <span>{classData.exams?.length || 0} exams</span>
+                  </div>
+                </div>
+
+                <div className="archived-class-actions">
+                  <button
+                    className="restore-btn"
+                    onClick={(e) => confirmRestore(classData, e)}
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Restore
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  // Settings content renderer
+  const renderSettingsContent = () => (
+    <div className="settings-view">
+      <div className="settings-header">
+        <h2>Settings</h2>
+        <p>Manage your account and notification preferences</p>
+      </div>
+      <div className="settings-sections">
+        <div className="settings-section">
+          <h3>Account Settings</h3>
+          <p className="settings-description">Manage your account information and preferences</p>
+          <div className="settings-item">
+            <div className="settings-item-content">
+              <h4>Profile Information</h4>
+              <p>Update your name, email, and profile picture</p>
+            </div>
+            <button 
+              className="settings-btn"
+              onClick={handleManageSettings}
+            >
+              Manage
+            </button>
+          </div>
+          
+          <div className="settings-item">
+            <div className="settings-item-content">
+              <h4>Privacy & Security</h4>
+              <p>Manage your privacy settings and security options</p>
+            </div>
+            <button 
+              className="settings-btn"
+              onClick={handleManageSettings}
+            >
+              Manage
+            </button>
+          </div>
+        </div>
+        
+        <div className="settings-section">
+          <h3>Application Settings</h3>
+          <p className="settings-description">Customize your application experience</p>
+          <div className="settings-item">
+            <div className="settings-item-content">
+              <h4>Theme & Appearance</h4>
+              <p>Change the look and feel of the application</p>
+            </div>
+            <button 
+              className="settings-btn"
+              onClick={handleManageSettings}
+            >
+              Manage
+            </button>
+          </div>
+          
+          <div className="settings-item">
+            <div className="settings-item-content">
+              <h4>Language & Region</h4>
+              <p>Set your preferred language and regional settings</p>
+            </div>
+            <button 
+              className="settings-btn"
+              onClick={handleManageSettings}
+            >
+              Manage
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   // ===== MODAL COMPONENTS =====
   const DeployExamModal = () => {
@@ -4010,73 +3837,119 @@ const renderGradesTab = () => {
   };
 
   // ✅ ADDED: JOIN CLASS MODAL COMPONENT
-  const JoinModal = () => {
-    if (!showJoinModal) return null;
+  // ✅ FIXED: JoinModal Component without auto-selection
+const JoinModal = () => {
+  if (!showJoinModal) return null;
 
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-          <div className="flex items-center space-x-3 mb-4">
-            <div className="flex-shrink-0">
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                <FaUserPlus className="w-5 h-5 text-blue-600" />
-              </div>
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">Join Class</h3>
-              <p className="text-sm text-gray-600">Enter a class code to join</p>
-            </div>
-          </div>
-          
-          <form onSubmit={joinClass}>
-            <div className="mb-4">
-              <label htmlFor="joinCode" className="block text-sm font-medium text-gray-700 mb-2">
-                Class Code
-              </label>
-              <input
-                type="text"
-                id="joinCode"
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value)}
-                placeholder="Enter 6-digit class code"
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                required
-                maxLength={6}
-                pattern="[A-Z0-9]{6}"
-                title="Enter a 6-digit class code (letters and numbers only)"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Enter the code provided by your teacher. Format: 6 letters/numbers.
-              </p>
-            </div>
-            
-            <div className="flex justify-end space-x-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowJoinModal(false);
-                  setJoinCode("");
-                }}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-              >
-                Join Class
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
+  const inputRef = useRef(null);
+  
+  // ✅ REMOVED: Auto-focus and select on modal open
+  useEffect(() => {
+    if (showJoinModal && inputRef.current) {
+      setTimeout(() => {
+        inputRef.current?.focus();
+        // ✅ FIXED: Don't select all text, just move cursor to end
+        const length = inputRef.current.value.length;
+        inputRef.current.setSelectionRange(length, length);
+      }, 100);
+    }
+  }, [showJoinModal]);
+
+  // ✅ SIMPLIFIED: Handle input change
+  const handleInputChange = (e) => {
+    const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    setJoinCode(value);
   };
 
-  // ✅ ADDED: CREATE CLASS MODAL COMPONENT
+  // ✅ SIMPLIFIED: Handle form submission
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (joinCode.trim().length === 6) {
+      joinClass(e);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center space-x-3 mb-4">
+          <div className="flex-shrink-0">
+            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+              <FaUserPlus className="w-5 h-5 text-blue-600" />
+            </div>
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Join Class</h3>
+            <p className="text-sm text-gray-600">Enter a class code to join</p>
+          </div>
+        </div>
+        
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label htmlFor="joinCode" className="block text-sm font-medium text-gray-700 mb-2">
+              Class Code
+            </label>
+            <input
+              ref={inputRef}
+              type="text"
+              id="joinCode"
+              value={joinCode}
+              onChange={handleInputChange}
+              placeholder="Enter 6-digit class code"
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all duration-200"
+              required
+              maxLength={6}
+              pattern="[A-Z0-9]{6}"
+              title="Enter a 6-digit class code (letters and numbers only)"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="characters"
+              spellCheck="false"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Enter the code provided by your teacher. Format: 6 letters/numbers.
+            </p>
+            <p className="text-xs text-blue-600 mt-1">
+              {joinCode.length}/6 characters
+            </p>
+          </div>
+          
+          <div className="flex justify-end space-x-3">
+            <button
+              type="button"
+              onClick={() => {
+                setShowJoinModal(false);
+                setJoinCode("");
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={joinCode.length !== 6}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Join Class
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+  // ✅ ADDED: CreateClassModal Component with useRef
   const CreateClassModal = () => {
     if (!showCreateModal) return null;
+
+    const inputRef = useRef(null);
+
+    useEffect(() => {
+      if (showCreateModal && inputRef.current) {
+        inputRef.current.focus();
+      }
+    }, [showCreateModal]);
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -4099,6 +3972,7 @@ const renderGradesTab = () => {
                 Class Name
               </label>
               <input
+                ref={inputRef}
                 type="text"
                 id="className"
                 value={className}
@@ -4106,6 +3980,7 @@ const renderGradesTab = () => {
                 placeholder="Enter class name (e.g., Math 101)"
                 className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 required
+                autoFocus
               />
               <p className="text-xs text-gray-500 mt-1">
                 This will be the name students see when joining your class.
@@ -4561,630 +4436,6 @@ const renderGradesTab = () => {
     }
   };
 
-  // ===== ENHANCED CLASSWORK TAB WITH EXAM TYPE SUPPORT =====
-  const renderClassworkTab = () => {
-    const filteredClasswork = classwork.filter(item => {
-      if (selectedClass?.userRole === "student" && item.type === 'quiz') {
-        const hasCompleted = item.completedBy?.some(completion => 
-          completion.studentId === user._id
-        );
-        return !hasCompleted;
-      }
-      return true;
-    });
-
-    // ✅ UPDATED: Filter quizzes/exams from classwork
-    const displayExams = classwork
-      .filter(item => item.type === 'quiz' || item.isQuiz || item.examType || item._id?.startsWith('quiz'))
-      .map(item => {
-        // Ensure all required fields exist
-        const examData = {
-          _id: item._id,
-          title: item.title || 'Untitled Quiz',
-          description: item.description || '',
-          examType: item.examType || 'asynchronous',
-          isLiveClass: item.examType === 'live-class' || item.isLiveClass || false,
-          status: item.isPublished || item.isDeployed ? 'posted' : 'draft',
-          statusText: item.isPublished || item.isDeployed ? 
-            `Posted ${item.createdAt ? new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'recently'}` : 
-            'Draft',
-          type: 'quiz',
-          isActive: item.isActive || false,
-          isDeployed: item.isDeployed || false,
-          isPublished: item.isPublished || false,
-          completedBy: item.completedBy || [],
-          scheduledDate: item.scheduledAt ? new Date(item.scheduledAt) : null,
-          postedAt: item.createdAt ? new Date(item.createdAt) : new Date(),
-          isDemo: item._id?.startsWith('quiz') || item._id?.startsWith('demo-') || false,
-          // ✅ ADD THIS - Ensure timeLimit is included
-          timeLimit: item.timeLimit || 60
-        };
-        
-        console.log('📋 Processed exam data for display:', examData);
-        return examData;
-      });
-
-    const renderExamCard = (exam) => {
-      const examTypeDisplay = getExamTypeDisplay(exam);
-      const actionButton = getExamActionButton(exam, selectedClass?.userRole, user._id);
-      
-      // ✅ ADD THIS: Check if teacher can view summary (exam is completed/has submissions)
-      const canViewSummary = selectedClass?.userRole === "teacher" && 
-        (exam.completedBy?.length > 0 || exam.isActive === false);
-      
-      return (
-        <div key={exam._id} className="exam-card">
-          <div className="exam-card-header">
-            <div className="exam-icon-container">
-              <span className={`exam-type-badge ${examTypeDisplay.color}`}>
-                {examTypeDisplay.icon} {examTypeDisplay.label}
-              </span>
-            </div>
-            
-            <div className="exam-title-section">
-              <h3 className="exam-title">{exam.title}</h3>
-              {exam.description && (
-                <p className="exam-description">{exam.description}</p>
-              )}
-              <div className={`exam-status ${exam.status}`}>
-                {exam.statusText}
-              </div>
-            </div>
-            
-            {/* ✅ ADD THIS: VIOLATION SUMMARY BUTTON FOR TEACHERS */}
-            {selectedClass?.userRole === "teacher" && (
-              <div className="exam-actions-dropdown">
-                <button 
-                  className="exam-menu-btn"
-                  onClick={(e) => toggleQuizMenu(exam._id, e)}
-                  style={{
-                    position: 'absolute',
-                    top: '10px',
-                    right: '10px',
-                    zIndex: 10,
-                    background: 'white',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '4px',
-                    padding: '4px 8px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <FaEllipsisV />
-                </button>
-                
-                {showQuizMenu === exam._id && (
-                  <div 
-                    className="exam-menu-dropdown"
-                    style={{
-                      position: 'absolute',
-                      top: '35px',
-                      right: '10px',
-                      zIndex: 20,
-                      background: 'white',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '6px',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                      minWidth: '180px'
-                    }}
-                  >
-                    {/* Edit Button */}
-                    <button 
-                      className="exam-menu-item"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditQuiz(exam);
-                      }}
-                    >
-                      <FaEdit className="menu-item-icon" />
-                      Edit
-                    </button>
-                    
-                    {/* VIOLATION SUMMARY BUTTON */}
-                    {canViewSummary && (
-                      <button 
-                        className="exam-menu-item"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleViewViolationSummary(exam);
-                          setShowQuizMenu(null);
-                        }}
-                      >
-                        <svg className="menu-item-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                        </svg>
-                        View Detection Summary
-                      </button>
-                    )}
-                    
-                    {exam.examType === 'live-class' ? (
-                      <>
-                        {exam.isActive ? (
-                          <button 
-                            className="exam-menu-item"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEndExamSession(exam._id);
-                              setShowQuizMenu(null);
-                            }}
-                          >
-                            <span className="menu-item-icon">🛑</span>
-                            End Live Class
-                          </button>
-                        ) : (
-                          <button 
-                            className="exam-menu-item"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleStartExamSession(exam);
-                              setShowQuizMenu(null);
-                            }}
-                          >
-                            <span className="menu-item-icon">🚀</span>
-                            Start Live Class
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        {exam.isDeployed ? (
-                          <button 
-                            className="exam-menu-item"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleUndeployExam(exam._id);
-                              setShowQuizMenu(null);
-                            }}
-                          >
-                            <span className="menu-item-icon">📦</span>
-                            Undeploy Exam
-                          </button>
-                        ) : (
-                          <button 
-                            className="exam-menu-item"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeployExam(exam);
-                              setShowQuizMenu(null);
-                            }}
-                          >
-                            <span className="menu-item-icon">🚀</span>
-                            Deploy Exam
-                          </button>
-                        )}
-                      </>
-                    )}
-                    
-                    {/* Delete Button */}
-                    <button 
-                      className="exam-menu-item delete"
-                      onClick={(e) => handleDeleteQuizClick(exam, e)}
-                    >
-                      <FaTrash className="menu-item-icon" />
-                      Delete
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="exam-info">
-            <div className="exam-meta">
-              <span className="exam-type">{exam.examType === 'live-class' ? 'Live Class' : 'Async Quiz'}</span>
-              {exam.examType === 'asynchronous' && (
-                <span className="exam-duration">
-                   {exam.timeLimit || 60} minutes
-                </span>
-              )}
-              {exam.scheduledDate && (
-                <span className="exam-date">
-                  {exam.examType === 'live-class' ? 'Starts: ' : 'Due: '}
-                  {exam.scheduledDate.toLocaleDateString()}
-                </span>
-              )}
-              {exam.isDemo && (
-                <span className="demo-badge">Demo</span>
-              )}
-              {exam.isActive && (
-                <span className="live-badge">🔴 LIVE</span>
-              )}
-              <span className={`exam-status ${exam.status}`}>
-                {exam.statusText || 
-                  (exam.isActive ? 'Session Active' : 
-                   exam.isDeployed ? 'Published' : 
-                   exam.status === 'draft' ? 'Draft' : 
-                   'Not Available')}
-              </span>
-            </div>
-            
-            {/* Action Button */}
-        
-<div className="exam-action-button">
-  {actionButton ? (
-    <button 
-      className={`action-btn ${actionButton.variant} ${actionButton.action === 'none' ? 'disabled' : ''}`}
-      onClick={() => {
-        if (actionButton.action !== 'none') {
-          handleQuizAction(exam);
-        }
-      }}
-      disabled={actionButton.action === 'none'}
-    >
-      <span className="action-icon">{actionButton.icon}</span>
-      <span className="action-label">{actionButton.label}</span>
-    </button>
-  ) : (
-    // Teacher async quiz - no button or show "View" button
-    <div>
-    </div>
-  )}
-
-              
-              {selectedClass?.userRole === "student" && exam.examType !== 'live-class' && actionButton?.action === 'review' && (
-                <button 
-                  className="review-btn secondary"
-                  onClick={() => navigate(`/review-exam/${exam._id}`)}
-                >
-                  📊 Review Answers
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    };
-
-    return (
-      <div className="classwork-tab">
-        {/* Header Section */}
-        <div className="classwork-header-section">
-          <div className="classwork-header">
-            <div className="classwork-title">
-              <h2>Classwork</h2>
-            </div>
-            
-            {selectedClass?.userRole === "teacher" && (
-              <div className="classwork-actions">
-                <button 
-                  className="create-btn"
-                  onClick={() => {
-                    if (selectedClass) {
-                      navigate(`/class/${selectedClass._id}/quiz/new`);
-                    } else {
-                      alert('Please select a class first');
-                    }
-                  }}
-                >
-                  <FaPlus className="btn-icon" />
-                  Create
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Role Indicator */}
-          <div className="role-indicator">
-            {selectedClass?.userRole === "teacher" ? (
-              <div className="teacher-indicator">
-                👨‍🏫 You are viewing this class as a <strong>teacher</strong>.
-                {classwork.some(item => item.type === 'quiz' || item.isQuiz) && (
-                  <button 
-                    className="delete-all-quizzes-btn"
-                    onClick={handleDeleteAllQuizzes}
-                    disabled={deletingAll}
-                  >
-                    {deletingAll ? 'Deleting...' : 'Delete All Quizzes'}
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div >
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Exam Cards Grid - With Exam Type Support */}
-        <div className="exam-cards-grid">
-          {displayExams.length > 0 ? (
-            displayExams.map((exam) => renderExamCard(exam))
-          ) : (
-            <div className="no-exams-message">
-              <div className="no-exams-icon">📝</div>
-              <h3>No quizzes or exams yet</h3>
-              <p>
-                {selectedClass?.userRole === "teacher" 
-                  ? "Create a quiz or exam to get started. You can create live classes or async quizzes."
-                  : "No quizzes or exams have been assigned yet."}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Existing Classwork Content */}
-        <div className="classwork-content">
-          {filteredClasswork.length === 0 ? (
-            <div className="classwork-empty-state">
-              <div className="empty-illustration">
-                {/* Your existing empty state */}
-              </div>
-              <div className="empty-content">
-                <h3>No classwork available</h3>
-                <p>
-                  {selectedClass?.userRole === "teacher" 
-                    ? "Create assignments, quizzes, or materials to get started."
-                    : "All available work has been completed or no classwork is available."}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="classwork-grid">
-              {/* Your existing classwork items */}
-              {filteredClasswork.map((item) => (
-                <div className="classwork-card" key={item._id}>
-                  {/* Your existing classwork card content */}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {renderCompletedExams()}
-        </div>
-      </div>
-    );
-  };
-
-  // Home content renderer
-  const renderHomeContent = () => {
-    if (selectedClass) {
-      return (
-        <div className="class-details">
-          <div className="class-header">
-            <h2>{selectedClass.name}</h2>
-            <div className="class-info-grid">
-              <div className="class-info-item">
-                <span className="info-label">Class code:</span>
-                <span className="info-value">{selectedClass.code}</span>
-              </div>
-              <div className="class-info-item">
-                <span className="info-label">Your role:</span>
-                <span className={`info-value role ${selectedClass.userRole}`}>
-                  {selectedClass.userRole === "teacher" ? "Teacher" : "Student"}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="classroom-tabs">
-            {selectedClass?.userRole === "teacher" && (
-              <>
-                <button 
-                  className={`classroom-tab ${activeTab === "classwork" ? "active" : ""}`}
-                  onClick={() => setActiveTab("classwork")}
-                >
-                  Classwork
-                </button>
-                <button 
-                  className={`classroom-tab ${activeTab === "people" ? "active" : ""}`}
-                  onClick={() => setActiveTab("people")}
-                >
-                  People
-                </button>
-                {/* ✅ CHAT TAB REMOVED */}
-                <button 
-                  className={`classroom-tab ${activeTab === "grades" ? "active" : ""}`}
-                  onClick={() => setActiveTab("grades")}
-                >
-                  Grades
-                </button>
-              </>
-            )}
-            
-            {selectedClass?.userRole === "student" && (
-              <>
-                <button 
-                  className={`classroom-tab ${activeTab === "classwork" ? "active" : ""}`}
-                  onClick={() => setActiveTab("classwork")}
-                >
-                  Stream
-                </button>
-                {/* ✅ ADD TO DO TAB FOR STUDENTS */}
-                <button 
-                  className={`classroom-tab ${activeTab === "todo" ? "active" : ""}`}
-                  onClick={() => setActiveTab("todo")}
-                >
-                  To do
-                </button>
-                {/* ✅ CHAT TAB REMOVED FOR STUDENTS */}
-              </>
-            )}
-          </div>
-
-          {activeTab === "classwork" && renderClassworkTab()}
-
-          {activeTab === "people" && renderPeopleTab()}
-
-          {/* ✅ TO DO TAB RENDERER */}
-          {activeTab === "todo" && renderToDoTab()}
-
-          {/* ✅ CHAT TAB RENDERER REMOVED */}
-
-          {activeTab === "grades" && renderGradesTab()}
-        </div>
-      );
-    }
-
-    return (
-      <div className="home-view">
-        {allClasses.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-actions">
-              {userRole === "teacher" ? (
-                <button 
-                  className="primary-btn"
-                  onClick={() => setShowCreateModal(true)}
-                >
-                  <FaPlus className="btn-icon" />
-                  Create Your First Class
-                </button>
-              ) : (
-                <button 
-                  className="primary-btn"
-                  onClick={() => setShowJoinModal(true)}
-                >
-                  <FaUserPlus className="btn-icon" />
-                  Join a Class
-                </button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="class-grid">
-            {allClasses.map((classData) => (
-              <ClassCard key={classData._id} classData={classData} />
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Calendar content renderer
-  const renderCalendarContent = () => (
-    <div className="calendar-view">
-      <div className="calendar-header">
-        <h2>Calendar</h2>
-        <p>View your scheduled exams and assignments</p>
-      </div>
-      <GoogleClassroomCalendar />
-    </div>
-  );
-
-  // Archived content renderer
-  const renderArchivedContent = () => (
-    <div className="archived-view">
-      <div className="archived-header">
-        <h2>Archived Classes</h2>
-      </div>
-
-      {archivedClasses.length === 0 ? (
-        <div className="archived-empty">
-          <h3>No archived classes</h3>
-          <p>When you archive classes, they'll appear here.</p>
-        </div>
-      ) : (
-        <div className="archived-classes-grid">
-          {archivedClasses.map((classData) => (
-            <div key={classData._id} className="archived-class-card">
-              <div className="archived-class-content">
-                <div className="archived-class-header">
-                  <h3 className="archived-class-name">{classData.name}</h3>
-                  <span className="archived-badge">Archived</span>
-                </div>
-                
-                <div className="archived-class-info">
-                  <p className="text-sm text-gray-600">
-                    Class Code: <strong className="font-mono">{classData.code}</strong>
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    Archived: {new Date(classData.archivedAt).toLocaleDateString()}
-                  </p>
-                  <div className="flex justify-between text-xs text-gray-500 pt-2">
-                    <span>{classData.members?.length || 1} members</span>
-                    <span>{classData.exams?.length || 0} exams</span>
-                  </div>
-                </div>
-
-                <div className="archived-class-actions">
-                  <button
-                    className="restore-btn"
-                    onClick={(e) => confirmRestore(classData, e)}
-                  >
-                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    Restore
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
-  // Settings content renderer
-  const renderSettingsContent = () => (
-    <div className="settings-view">
-      <div className="settings-header">
-        <h2>Settings</h2>
-        <p>Manage your account and notification preferences</p>
-      </div>
-      <div className="settings-sections">
-        <div className="settings-section">
-          <h3>Account Settings</h3>
-          <p className="settings-description">Manage your account information and preferences</p>
-          <div className="settings-item">
-            <div className="settings-item-content">
-              <h4>Profile Information</h4>
-              <p>Update your name, email, and profile picture</p>
-            </div>
-            <button 
-              className="settings-btn"
-              onClick={handleManageSettings}
-            >
-              Manage
-            </button>
-          </div>
-          
-          <div className="settings-item">
-            <div className="settings-item-content">
-              <h4>Privacy & Security</h4>
-              <p>Manage your privacy settings and security options</p>
-            </div>
-            <button 
-              className="settings-btn"
-              onClick={handleManageSettings}
-            >
-              Manage
-            </button>
-          </div>
-        </div>
-        
-        <div className="settings-section">
-          <h3>Application Settings</h3>
-          <p className="settings-description">Customize your application experience</p>
-          <div className="settings-item">
-            <div className="settings-item-content">
-              <h4>Theme & Appearance</h4>
-              <p>Change the look and feel of the application</p>
-            </div>
-            <button 
-              className="settings-btn"
-              onClick={handleManageSettings}
-            >
-              Manage
-            </button>
-          </div>
-          
-          <div className="settings-item">
-            <div className="settings-item-content">
-              <h4>Language & Region</h4>
-              <p>Set your preferred language and regional settings</p>
-            </div>
-            <button 
-              className="settings-btn"
-              onClick={handleManageSettings}
-            >
-              Manage
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
   // ===== MAIN COMPONENT RENDER =====
   return (
     <div className="dashboard-wrapper">
@@ -5250,7 +4501,7 @@ const renderGradesTab = () => {
                       }}
                     >
                       <FaPlus className="create-join-icon" />
-                      Create Quiz
+                      Create Live Class
                     </button>
                   )}
                 </div>
@@ -5361,7 +4612,6 @@ const renderGradesTab = () => {
               <span className="sidebar-text">Calendar</span>
             </button>
             
-            <hr className="sidebar-separator" />
             
             {/* TEACHING CLASSES SECTION */}
             {userRole === "teacher" && (
@@ -5380,8 +4630,6 @@ const renderGradesTab = () => {
                     
                     {teachingDropdownOpen && (
                       <div className="teaching-dropdown">
-                        {/* ✅ REMOVED: "To review" button */}
-                        
                         <div className="teaching-classes-list">
                           {teachingClasses.map((classData) => (
                             <div
@@ -5417,32 +4665,35 @@ const renderGradesTab = () => {
               </>
             )}
             
-            {/* ENROLLED CLASSES SECTION */}
-            {userRole === "student" && enrolledClasses.length > 0 && (
-              <>
-                <div 
-                  className="section-header dropdown-header"
-                  onClick={() => setEnrolledDropdownOpen(!enrolledDropdownOpen)}
-                >
-                  <span>Enrolled ({enrolledClasses.length})</span>
-                  <span className={`dropdown-arrow ${enrolledDropdownOpen ? 'open' : ''}`}>
-                    <FaChevronLeft />
-                  </span>
-                </div>
-                
-                {enrolledDropdownOpen && (
-                  <div className="enrolled-dropdown">
-                    
-                    {/* ✅ REMOVED: "To review" button for students */}
-                    
-                    <div className="enrolled-classes-list">
-                      {enrolledClasses.slice(0, 8).map((classData) => (
+          {/* ENROLLED CLASSES SECTION - FIXED BACKGROUND COLOR */}
+          {userRole === "student" && enrolledClasses.length > 0 && (
+            <>
+              <div 
+                className="section-header dropdown-header"
+                onClick={() => setEnrolledDropdownOpen(!enrolledDropdownOpen)}
+              >
+                <span>ENROLLED ({enrolledClasses.length})</span>
+                <span className={`dropdown-arrow ${enrolledDropdownOpen ? 'open' : ''}`}>
+                  <FaChevronLeft />
+                </span>
+              </div>
+              
+              {enrolledDropdownOpen && (
+                <div className="enrolled-dropdown">
+                  <div className="enrolled-classes-list">
+                    {enrolledClasses.slice(0, 8).map((classData) => {
+                      // Get the first letter of your name for the avatar
+                      const userInitial = user.name ? user.name.charAt(0).toUpperCase() : 'S';
+                      // Get a consistent color for this class
+                      const classColor = getRandomColor();
+                      
+                      return (
                         <div
                           key={classData._id}
                           className={`class-list-item ${selectedClass?._id === classData._id ? 'selected' : ''}`}
                           onClick={() => handleSelectClass(classData)}
                         >
-                          <div className={`class-avatar ${getRandomColor()}`}>
+                          <div className={`class-avatar ${classColor}`}>
                             {classData.name.charAt(0).toUpperCase()}
                           </div>
                           <div className="class-info">
@@ -5451,12 +4702,13 @@ const renderGradesTab = () => {
                           </div>
                           <span className="role-badge student">Student</span>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
-                )}
-              </>
-            )}
+                </div>
+              )}
+            </>
+          )}
             
             {userRole === "student" && enrolledClasses.length === 0 && (
               <div className="empty-sidebar-section">
@@ -5470,9 +4722,7 @@ const renderGradesTab = () => {
               </div>
             )}
             
-            <hr className="sidebar-separator" />
             
-           
             
             <button 
               className={`sidebar-item ${activeSidebar === 'archived' ? 'active' : ''}`}
@@ -5519,7 +4769,7 @@ const renderGradesTab = () => {
           }}
           examId={selectedExamForSummary._id}
           examTitle={selectedExamForSummary.title}
-          examType={selectedExamForSummary.examType || 'asynchronous'}
+          examType={selectedExamForSummary.examType || 'live-class'}
         />
       )}
     </div>

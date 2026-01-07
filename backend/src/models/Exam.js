@@ -1,4 +1,4 @@
-// backend/models/Exam.js - UPDATED VERSION WITH EXAM TYPE & LIVE CLASS SUPPORT
+// backend/models/Exam.js - UPDATED VERSION - LIVE CLASS ONLY
 const mongoose = require("mongoose");
 
 // ✅ COMMENT SCHEMA
@@ -16,65 +16,21 @@ const examSchema = new mongoose.Schema({
   classId: { type: mongoose.Schema.Types.ObjectId, ref: "Class", required: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   
-  // ✅ NEW EXAM TYPE & LIVE CLASS FIELDS
+  // ✅ UPDATED: LIVE CLASS ONLY
   examType: {
     type: String,
-    enum: ['asynchronous', 'live-class'],
-    default: 'asynchronous'
+    enum: ['live-class'],
+    default: 'live-class'
   },
   isLiveClass: {
     type: Boolean,
-    default: false
-   },
-  timerSettings: { // ✅ ADD THIS NEW FIELD
-    hours: { type: Number, default: 0 },
-    minutes: { type: Number, default: 0 },
-    seconds: { type: Number, default: 0 },
-    totalSeconds: { type: Number, default: 0 }
+    default: true
   },
 
-  // ✅ TIMER PERSISTENCE FIELDS
-  timerState: {
-    remainingSeconds: {
-      type: Number,
-      default: 0
-    },
-    lastUpdated: {
-      type: Date,
-      default: Date.now
-    },
-    isRunning: {
-      type: Boolean,
-      default: false
-    },
-    startedAt: {
-      type: Date,
-      default: null
-    },
-    pausedAt: {
-      type: Date,
-      default: null
-    },
-    totalDuration: {
-      type: Number, // in seconds
-      default: 0
-    }
-  },
-  
-  // Store timer for each student
-  studentTimers: [{
-    studentId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    remainingSeconds: Number,
-    lastUpdated: Date,
-    isRunning: Boolean,
-    startedAt: Date,
-    totalDuration: Number
-  }],
-
-  
+  // ✅ REMOVED ASYNC FIELDS:
+  // - timerSettings (deleted)
+  // - timerState (deleted)
+  // - studentTimers (deleted)
   
   // ✅ STATUS & SCHEDULING FIELDS
   status: {
@@ -97,7 +53,7 @@ const examSchema = new mongoose.Schema({
   endedAt: { type: Date },
   timeLimit: { 
     type: Number, 
-    default: 60 // in minutes
+    default: 0 // No time limit for live classes
   },
   
   // ✅ JOINED STUDENTS TRACKING
@@ -209,7 +165,7 @@ const examSchema = new mongoose.Schema({
   publishedAt: { type: Date }
 });
 
-// ✅ UPDATED Calculate total points and handle exam type logic
+// ✅ UPDATED pre-save middleware - LIVE CLASS ONLY
 examSchema.pre("save", function(next) {
   this.updatedAt = Date.now();
   
@@ -222,45 +178,39 @@ examSchema.pre("save", function(next) {
     this.totalPoints = 0;
   }
   
-  // ✅ Auto-update status based on scheduling and deployment
-  if (this.scheduledAt && this.scheduledAt > new Date() && !this.isDeployed) {
-    this.status = 'scheduled';
-  } else if (this.isDeployed) {
+  // ✅ FORCE ALL EXAMS TO BE LIVE-CLASS
+  this.examType = 'live-class';
+  this.isLiveClass = true;
+  this.timeLimit = 0; // No time limit for live classes
+  
+  // ✅ UPDATED STATUS LOGIC FOR LIVE CLASSES ONLY
+  if (this.isDeployed || this.isPublished) {
     this.status = 'published';
+    if (!this.publishedAt) {
+      this.publishedAt = new Date();
+    }
   } else {
     this.status = 'draft';
   }
   
-  // ✅ AUTO-SET isLiveClass AND TIME LIMIT BASED ON examType
-  if (this.examType === 'live-class') {
-    this.isLiveClass = true;
-    this.timeLimit = 0; // No time limit for live classes
-  } else {
-    this.isLiveClass = false;
-    // For async, ensure timeLimit is set (default 60 minutes)
-    if (!this.timeLimit || this.timeLimit <= 0) {
-      this.timeLimit = 60;
-    }
-  }
-  
-  // Auto-set publishedAt if published
-  if (this.status === 'published' && !this.publishedAt) {
-    this.publishedAt = new Date();
+  // ✅ Clear scheduledAt if publishing immediately
+  if (this.status === 'published' && this.scheduledAt) {
+    this.scheduledAt = null;
   }
   
   next();
 });
 
-// ✅ ADDED Method to get exam info (as requested)
+// ✅ ADDED Method to get exam info
 examSchema.methods.getExamInfo = function() {
   return {
     _id: this._id,
     title: this.title,
     description: this.description,
     classId: this.classId,
-    examType: this.examType || 'asynchronous',
-    isLiveClass: this.isLiveClass || false,
-    timeLimit: this.timeLimit || 60,
+    examType: this.examType || 'live-class',
+    isLiveClass: this.isLiveClass || true,
+    timeLimit: this.timeLimit || 0,
     isActive: this.isActive || false,
     status: this.status || 'draft',
     isDeployed: this.isDeployed || false,
@@ -320,7 +270,7 @@ examSchema.methods.updateComment = function(commentId, content) {
   return Promise.reject(new Error('Comment not found'));
 };
 
-// ✅ Method to schedule an exam
+// ✅ Method to schedule an exam (for live classes only)
 examSchema.methods.scheduleExam = function(scheduledAt) {
   this.scheduledAt = scheduledAt;
   this.status = 'scheduled';
@@ -330,51 +280,41 @@ examSchema.methods.scheduleExam = function(scheduledAt) {
 // ✅ Method to publish exam immediately
 examSchema.methods.publishExam = function() {
   this.isDeployed = true;
+  this.isPublished = true;
   this.status = 'published';
   this.publishedAt = new Date();
   this.scheduledAt = null; // Clear schedule if publishing immediately
   return this.save();
 };
 
-// ✅ Method to set exam type
+// ✅ UPDATED Method to set exam type - LIVE CLASS ONLY
 examSchema.methods.setExamType = function(examType) {
-  this.examType = examType;
-  this.isLiveClass = (examType === 'live-class');
-  // Auto-adjust timeLimit for live classes
-  if (examType === 'live-class') {
-    this.timeLimit = 0;
-  } else if (!this.timeLimit || this.timeLimit <= 0) {
-    this.timeLimit = 60;
-  }
+  // Force live-class only
+  this.examType = 'live-class';
+  this.isLiveClass = true;
+  this.timeLimit = 0;
   return this.save();
 };
 
-// ✅ Method to check if exam is currently available to students
+// ✅ UPDATED Method to check if exam is currently available to students
 examSchema.methods.isAvailable = function() {
-  const now = new Date();
-  if (this.status === 'published') {
-    return true;
-  }
-  if (this.status === 'scheduled' && this.scheduledAt && this.scheduledAt <= now) {
-    return true;
-  }
-  return false;
+  // Live classes are available when published
+  return this.status === 'published' || (this.isPublished && this.isDeployed);
 };
 
 // ✅ Method to check if exam is a live class session
 examSchema.methods.isLiveSession = function() {
-  return this.examType === 'live-class' && this.isActive;
+  return this.isActive && this.isLiveClass;
 };
 
 // ✅ Method to start a live session
 examSchema.methods.startLiveSession = function() {
-  if (this.examType !== 'live-class') {
-    return Promise.reject(new Error('Only live-class exams can start live sessions'));
-  }
+  // All exams are live-class now
   this.isActive = true;
   this.startedAt = new Date();
   this.status = 'published';
   this.isDeployed = true;
+  this.isPublished = true;
   return this.save();
 };
 

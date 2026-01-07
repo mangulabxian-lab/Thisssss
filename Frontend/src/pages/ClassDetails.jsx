@@ -1,8 +1,8 @@
-// ClassDetails.jsx - COMPLETELY FIXED VERSION
+// ClassDetails.jsx - UPDATED FOR LIVE CLASSES ONLY
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { FaPlus, FaEdit, FaEye, FaRocket, FaTrash } from "react-icons/fa";
-import { getClassDetails, getClassMembers, getClasswork, getQuizForStudent } from "../lib/api";
+import { FaPlus, FaEdit, FaEye, FaTrash, FaVideo } from "react-icons/fa";
+import { getClassDetails, getClassMembers, getClasswork } from "../lib/api";
 import PeopleTab from "../components/PeopleTab";
 import "./ClassDetails.css";
 
@@ -17,14 +17,12 @@ export default function ClassDetails() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("classwork");
   
-  // Classwork Create Modal States
-  const [showCreateClassworkModal, setShowCreateClassworkModal] = useState(false);
-  const [classworkType, setClassworkType] = useState("assignment");
-  const [classworkTitle, setClassworkTitle] = useState("");
-  const [classworkDescription, setClassworkDescription] = useState("");
-  const [classworkPoints, setClassworkPoints] = useState("");
-  const [classworkDueDate, setClassworkDueDate] = useState("");
-  const [creatingClasswork, setCreatingClasswork] = useState(false);
+  // Classwork Create Modal States - Simplified for Live Classes
+  const [showCreateLiveClassModal, setShowCreateLiveClassModal] = useState(false);
+  const [liveClassTitle, setLiveClassTitle] = useState("");
+  const [liveClassDescription, setLiveClassDescription] = useState("");
+  const [liveClassSchedule, setLiveClassSchedule] = useState("");
+  const [creatingLiveClass, setCreatingLiveClass] = useState(false);
   const [deletingItem, setDeletingItem] = useState(null);
 
   // ✅ FIXED: Function to fetch classwork
@@ -142,31 +140,31 @@ export default function ClassDetails() {
     return false;
   };
 
-  // CREATE CLASSWORK FUNCTION
-  const handleCreateClasswork = async () => {
-    if (!classworkTitle.trim()) {
-      alert("Please enter a title");
+  // CREATE LIVE CLASS FUNCTION
+  const handleCreateLiveClass = async () => {
+    if (!liveClassTitle.trim()) {
+      alert("Please enter a title for the live class");
       return;
     }
 
-    setCreatingClasswork(true);
+    setCreatingLiveClass(true);
     try {
-      const classworkData = {
-        title: classworkTitle.trim(),
-        description: classworkDescription.trim(),
-        type: classworkType,
+      const liveClassData = {
+        title: liveClassTitle.trim(),
+        description: liveClassDescription.trim(),
+        type: "live_class", // Always live class
         classId: id,
-        points: classworkPoints ? parseInt(classworkPoints) : undefined,
-        dueDate: classworkDueDate || undefined
+        scheduledAt: liveClassSchedule || undefined,
+        isActive: false // Default to not started
       };
 
-      const response = await fetch('/api/classwork/create', {
+      const response = await fetch('/api/live-classes/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify(classworkData)
+        body: JSON.stringify(liveClassData)
       });
 
       const result = await response.json();
@@ -175,58 +173,45 @@ export default function ClassDetails() {
         setClasswork(prev => [result.data, ...prev]);
         
         // Reset form
-        setClassworkTitle("");
-        setClassworkDescription("");
-        setClassworkPoints("");
-        setClassworkDueDate("");
-        setClassworkType("assignment");
-        setShowCreateClassworkModal(false);
+        setLiveClassTitle("");
+        setLiveClassDescription("");
+        setLiveClassSchedule("");
+        setShowCreateLiveClassModal(false);
         
-        alert("Classwork created successfully!");
+        alert("Live class created successfully!");
       } else {
-        alert("Failed to create classwork: " + result.message);
+        alert("Failed to create live class: " + result.message);
       }
     } catch (error) {
-      console.error("Failed to create classwork:", error);
-      alert("Failed to create classwork: " + (error.message));
+      console.error("Failed to create live class:", error);
+      alert("Failed to create live class: " + (error.message));
     } finally {
-      setCreatingClasswork(false);
+      setCreatingLiveClass(false);
     }
   };
 
-  // DELETE CLASSWORK FUNCTION
-  const handleDeleteClasswork = async (itemId, itemTitle, itemType) => {
+  // DELETE LIVE CLASS FUNCTION
+  const handleDeleteLiveClass = async (itemId, itemTitle) => {
     if (!window.confirm(`Are you sure you want to delete "${itemTitle}"? This action cannot be undone.`)) {
       return;
     }
 
     setDeletingItem(itemId);
     try {
-      let response;
+      const response = await fetch(`/api/live-classes/${itemId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
       
-      if (itemType === 'quiz') {
-        response = await fetch(`/api/exams/${itemId}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
-        response = await response.json();
-      } else {
-        response = await fetch(`/api/classwork/${itemId}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
-        response = await response.json();
-      }
+      const result = await response.json();
 
-      if (response.success) {
+      if (result.success) {
         setClasswork(prev => prev.filter(item => item._id !== itemId));
-        alert(`${itemType === 'quiz' ? 'Quiz' : 'Assignment'} deleted successfully!`);
+        alert("Live class deleted successfully!");
       } else {
-        alert("Failed to delete: " + response.message);
+        alert("Failed to delete: " + result.message);
       }
     } catch (error) {
       console.error("Failed to delete:", error);
@@ -236,14 +221,14 @@ export default function ClassDetails() {
     }
   };
 
-  // DEPLOY EXAM FUNCTION
-  const handleDeployExam = async (examId, examTitle) => {
-    if (!window.confirm(`Are you sure you want to publish "${examTitle}"? Students will be able to see and take it.`)) {
+  // START LIVE CLASS FUNCTION
+  const handleStartLiveClass = async (liveClassId, liveClassTitle) => {
+    if (!window.confirm(`Start "${liveClassTitle}"? This will mark it as active for all students.`)) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/exams/deploy/${examId}`, {
+      const response = await fetch(`/api/live-classes/start/${liveClassId}`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -253,76 +238,91 @@ export default function ClassDetails() {
       
       if (result.success) {
         setClasswork(prev => prev.map(item => 
-          item._id === examId 
+          item._id === liveClassId 
             ? { 
                 ...item, 
-                isPublished: true,
-                isDeployed: true 
+                isActive: true,
+                startedAt: new Date().toISOString()
               }
             : item
         ));
-        alert("Quiz published successfully! Students can now see it.");
+        alert("Live class started! Students can now join.");
       } else {
-        alert("Failed to publish quiz: " + result.message);
+        alert("Failed to start live class: " + result.message);
       }
     } catch (error) {
-      console.error("Failed to publish quiz:", error);
-      alert("Failed to publish quiz: " + (error.response?.data?.message || error.message));
+      console.error("Failed to start live class:", error);
+      alert("Failed to start live class: " + (error.response?.data?.message || error.message));
     }
   };
 
-  // STUDENT QUIZ ACCESS FUNCTION
-  const handleStartQuiz = async (examId, examTitle) => {
+  // END LIVE CLASS FUNCTION
+  const handleEndLiveClass = async (liveClassId, liveClassTitle) => {
+    if (!window.confirm(`End "${liveClassTitle}"? This will mark it as ended for all students.`)) {
+      return;
+    }
+
     try {
-      console.log(" Student starting quiz:", examId, examTitle);
+      const response = await fetch(`/api/live-classes/end/${liveClassId}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      const result = await response.json();
       
-      const response = await getQuizForStudent(examId);
-      
-      if (response.success) {
-        navigate(`/student-quiz/${examId}`);
+      if (result.success) {
+        setClasswork(prev => prev.map(item => 
+          item._id === liveClassId 
+            ? { 
+                ...item, 
+                isActive: false,
+                endedAt: new Date().toISOString()
+              }
+            : item
+        ));
+        alert("Live class ended!");
       } else {
-        alert('Quiz not available: ' + response.message);
+        alert("Failed to end live class: " + result.message);
       }
     } catch (error) {
-      console.error("Failed to start quiz:", error);
-      alert("Failed to start quiz: " + (error.response?.data?.message || error.message));
+      console.error("Failed to end live class:", error);
+      alert("Failed to end live class: " + (error.response?.data?.message || error.message));
     }
   };
 
-  // Check if quiz is available for students
-  const isQuizAvailableForStudent = (item) => {
-    if (item.isPublished) return true;
-    if (item.isDeployed) return true;
-    if (item.isQuiz) return true;
-    if (item.type === 'quiz') return true;
-    
-    return false;
+  // JOIN LIVE CLASS FUNCTION (for students)
+  const handleJoinLiveClass = async (liveClassId, liveClassTitle) => {
+    try {
+      console.log(" Student joining live class:", liveClassId, liveClassTitle);
+      
+      // Check if live class is active
+      const liveClass = classwork.find(item => item._id === liveClassId);
+      if (!liveClass?.isActive) {
+        alert("This live class is not active yet. Please wait for the teacher to start it.");
+        return;
+      }
+      
+      // Navigate to live class room
+      navigate(`/live-class/${liveClassId}`);
+    } catch (error) {
+      console.error("Failed to join live class:", error);
+      alert("Failed to join live class: " + (error.response?.data?.message || error.message));
+    }
   };
 
-  // Reset classwork form
-  const resetClassworkForm = () => {
-    setClassworkTitle("");
-    setClassworkDescription("");
-    setClassworkPoints("");
-    setClassworkDueDate("");
-    setClassworkType("assignment");
-    setShowCreateClassworkModal(false);
-  };
-
-  // Get icon for classwork type
-  const getClassworkIcon = (type) => {
-    const icons = {
-      assignment: "📝",
-      quiz: "❓",
-      question: "💬",
-      material: "📎",
-      topic: "📂"
-    };
-    return icons[type] || "📄";
+  // Reset live class form
+  const resetLiveClassForm = () => {
+    setLiveClassTitle("");
+    setLiveClassDescription("");
+    setLiveClassSchedule("");
+    setShowCreateLiveClassModal(false);
   };
 
   // Get formatted time
   const getFormattedTime = (dateString) => {
+    if (!dateString) return "Not scheduled";
+    
     const date = new Date(dateString);
     const now = new Date();
     const diffMs = now - date;
@@ -339,6 +339,20 @@ export default function ClassDetails() {
     return date.toLocaleDateString();
   };
 
+  // Format scheduled time
+  const formatScheduledTime = (dateString) => {
+    if (!dateString) return "No schedule set";
+    
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
   if (loading) return (
     <div className="class-details-page">
       <div className="loading">Loading class details...</div>
@@ -351,7 +365,7 @@ export default function ClassDetails() {
         <h2>Class Not Found</h2>
         <p>The class you're looking for doesn't exist or you don't have access.</p>
         <button onClick={() => navigate("/dashboard")} className="back-btn">
-          ← Back to Dashboard
+          Back to Dashboard
         </button>
       </div>
     </div>
@@ -361,7 +375,7 @@ export default function ClassDetails() {
     <div className="class-details-page">
       <header className="class-header">
         <button className="back-btn" onClick={() => navigate("/dashboard")}>
-          ⬅ Back to Dashboard
+          Back to Dashboard
         </button>
         <div className="class-info">
           <h1>{classInfo.name}</h1>
@@ -373,13 +387,13 @@ export default function ClassDetails() {
         </div>
       </header>
 
-      {/* Tab Navigation - WITHOUT STREAM TAB */}
+      {/* Tab Navigation */}
       <div className="tabs-navigation">
         <button 
           className={`tab-btn ${activeTab === "classwork" ? "active" : ""}`}
           onClick={() => setActiveTab("classwork")}
         >
-          Classwork
+          Live Classes
         </button>
         <button 
           className={`tab-btn ${activeTab === "students" ? "active" : ""}`}
@@ -389,144 +403,138 @@ export default function ClassDetails() {
         </button>
       </div>
 
-      {/* CLASSWORK TAB */}
+      {/* LIVE CLASSES TAB */}
       {activeTab === "classwork" && (
         <section className="section">
           <div className="section-header">
-            <h2>Classwork</h2>
+            <h2>Live Classes</h2>
             {isTeacher() && (
               <div className="create-actions">
                 <button 
                   className="create-btn"
-                  onClick={() => setShowCreateClassworkModal(true)}
+                  onClick={() => setShowCreateLiveClassModal(true)}
                 >
                   <FaPlus className="btn-icon" />
-                  Create
-                </button>
-                <button 
-                  className="create-btn secondary"
-                  onClick={() => navigate(`/class/${id}/quiz/new`)}
-                >
-                  <FaPlus className="btn-icon" />
-                  New Quiz
+                  Schedule Live Class
                 </button>
               </div>
             )}
           </div>
 
-          {/* MAIN CLASSWORK AREA */}
+          {/* MAIN LIVE CLASSES AREA */}
           <div className="classwork-content">
             {classwork.length > 0 ? (
               <div className="classwork-grid">
                 {classwork.map((item) => {
-                  const isQuizAvailable = isQuizAvailableForStudent(item);
+                  // Show live class status
+                  const status = item.isActive ? 'live' : 
+                                item.endedAt ? 'ended' : 'scheduled';
 
                   return (
                     <div className="classwork-card" key={item._id}>
                       <div className="classwork-header">
                         <span className="classwork-icon">
-                          {getClassworkIcon(item.type)}
+                          🎥 {/* Changed from quiz icon */}
                         </span>
                         <div>
                           <h3>{item.title}</h3>
-                          <p className="classwork-type">{item.type}</p>
+                          <p className="classwork-type">Live Class</p> {/* Always Live Class */}
                         </div>
                       </div>
+                      
                       {item.description && (
                         <p className="classwork-description">{item.description}</p>
                       )}
+                      
+                      {/* Show live class status */}
                       <div className="classwork-meta">
-                        {item.dueDate && (
-                          <span>Due: {new Date(item.dueDate).toLocaleDateString()}</span>
+                        {item.isActive && (
+                          <span className="status live">🔴 LIVE NOW</span>
                         )}
-                        {item.points && (
-                          <span>{item.points} points</span>
+                        {item.endedAt && (
+                          <span className="status ended">🛑 Ended</span>
                         )}
-                        {item.questions && (
-                          <span>Questions: {item.questions.length || 0}</span>
+                        {!item.isActive && !item.endedAt && (
+                          <span className="status scheduled">⏸️ Not Started</span>
                         )}
-                        {(item.isPublished || item.isDeployed) && (
-                          <span className="status published">Published</span>
+                        
+                        {item.scheduledAt && (
+                          <span className="schedule-time">
+                            📅 {formatScheduledTime(item.scheduledAt)}
+                          </span>
                         )}
-                        {!item.isPublished && !item.isDeployed && item.type === 'quiz' && (
-                          <span className="status draft">Draft</span>
+                        
+                        {item.startedAt && (
+                          <span>Started: {getFormattedTime(item.startedAt)}</span>
+                        )}
+                        
+                        {item.endedAt && (
+                          <span>Ended: {getFormattedTime(item.endedAt)}</span>
                         )}
                       </div>
+                      
                       <div className="classwork-actions">
                         {isTeacher() ? (
                           <>
-                            {item.type === 'quiz' ? (
-                              <>
-                                <button 
-                                  className="btn-primary btn-small"
-                                  onClick={() => navigate(`/class/${id}/quiz/${item._id}/edit`)}
-                                >
-                                  <FaEdit /> Edit
-                                </button>
-                                <button 
-                                  className="btn-secondary btn-small"
-                                  onClick={() => navigate(`/exam/form/${item._id}`)}
-                                >
-                                  <FaEye /> Preview
-                                </button>
-                                {!item.isPublished && !item.isDeployed && (
-                                  <button 
-                                    className="deploy-btn btn-small"
-                                    onClick={() => handleDeployExam(item._id, item.title)}
-                                  >
-                                    <FaRocket /> Publish
-                                  </button>
-                                )}
-                                <button 
-                                  className="delete-btn btn-small"
-                                  onClick={() => handleDeleteClasswork(item._id, item.title, 'quiz')}
-                                  disabled={deletingItem === item._id}
-                                >
-                                  <FaTrash /> 
-                                  {deletingItem === item._id ? 'Deleting...' : 'Delete'}
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button 
-                                  className="btn-primary btn-small"
-                                  onClick={() => {/* Edit assignment logic */}}
-                                >
-                                  <FaEdit /> Edit
-                                </button>
-                                <button 
-                                  className="delete-btn btn-small"
-                                  onClick={() => handleDeleteClasswork(item._id, item.title, 'assignment')}
-                                  disabled={deletingItem === item._id}
-                                >
-                                  <FaTrash /> 
-                                  {deletingItem === item._id ? 'Deleting...' : 'Delete'}
-                                </button>
-                              </>
+                            <button 
+                              className="btn-primary btn-small"
+                              onClick={() => {/* Edit live class logic */}}
+                            >
+                              <FaEdit /> Edit
+                            </button>
+                            
+                            {!item.isActive && !item.endedAt && (
+                              <button 
+                                className="start-live-btn btn-small"
+                                onClick={() => handleStartLiveClass(item._id, item.title)}
+                              >
+                                <FaVideo /> Start Live
+                              </button>
                             )}
+                            
+                            {item.isActive && (
+                              <button 
+                                className="end-live-btn btn-small"
+                                onClick={() => handleEndLiveClass(item._id, item.title)}
+                              >
+                                ⏹️ End Live
+                              </button>
+                            )}
+                            
+                            <button 
+                              className="delete-btn btn-small"
+                              onClick={() => handleDeleteLiveClass(item._id, item.title)}
+                              disabled={deletingItem === item._id}
+                            >
+                              <FaTrash /> 
+                              {deletingItem === item._id ? 'Deleting...' : 'Delete'}
+                            </button>
                           </>
                         ) : (
-                          item.type === 'quiz' && (
-                            <div className="student-quiz-section">
-                              <button 
-                                className="start-quiz-btn"
-                                onClick={() => handleStartQuiz(item._id, item.title)}
-                                title={isQuizAvailable ? "Start this quiz" : "Quiz not available yet"}
-                              >
-                                 Start Quiz
-                              </button>
-                              {!isQuizAvailable && (
-                                <div className="quiz-info">
-                                  <small>This quiz is not available yet</small>
-                                </div>
-                              )}
-                            </div>
-                          )
+                          <div className="student-live-class-section">
+                            <button 
+                              className={`join-live-btn ${item.isActive ? 'active' : 'disabled'}`}
+                              onClick={() => handleJoinLiveClass(item._id, item.title)}
+                              disabled={!item.isActive}
+                            >
+                              {item.isActive ? '🔴 Join Live Class' : 'Join Live Class'}
+                            </button>
+                            {!item.isActive && (
+                              <div className="live-class-info">
+                                <small>
+                                  {item.endedAt 
+                                    ? "This live class has ended" 
+                                    : "Live class not started yet"}
+                                </small>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
+                      
                       <div className="classwork-footer">
-                        <span>Created by {item.createdBy?.name || 'Teacher'}</span>
-                        <span>{getFormattedTime(item.createdAt)}</span>
+                        <span>Hosted by {item.createdBy?.name || 'Teacher'}</span>
+                        <span>Created {getFormattedTime(item.createdAt)}</span>
                       </div>
                     </div>
                   );
@@ -537,34 +545,28 @@ export default function ClassDetails() {
                 <div className="empty-illustration">
                   <svg width="200" height="150" viewBox="0 0 200 150" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <rect x="40" y="50" width="120" height="80" rx="8" fill="#F8F9FA" stroke="#DADCE0" strokeWidth="2"/>
-                    <rect x="50" y="60" width="100" height="12" rx="6" fill="#E8F0FE"/>
-                    <rect x="50" y="80" width="80" height="8" rx="4" fill="#F1F3F4"/>
-                    <rect x="50" y="95" width="60" height="8" rx="4" fill="#F1F3F4"/>
-                    <circle cx="160" cy="110" r="15" fill="#1A73E8" fillOpacity="0.1" stroke="#1A73E8" strokeWidth="2"/>
-                    <path d="M155 110L158 113L165 106" stroke="#1A73E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <circle cx="100" cy="70" r="20" fill="#E8F0FE"/>
+                    <path d="M90 70L94 74L110 64" stroke="#1A73E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <rect x="50" y="100" width="100" height="8" rx="4" fill="#F1F3F4"/>
+                    <rect x="50" y="115" width="60" height="8" rx="4" fill="#F1F3F4"/>
                   </svg>
                 </div>
                 <div className="empty-content">
-                  <h3 className="empty-title">No classwork yet</h3>
+                  <h3 className="empty-title">No live classes yet</h3>
                   <p className="empty-description">
                     {isTeacher() 
-                      ? "Create assignments, quizzes, or materials to get started."
-                      : "Your teacher hasn't created any classwork yet."
+                      ? "Schedule your first live class to start interactive teaching sessions."
+                      : "Your teacher hasn't scheduled any live classes yet."
                     }
                   </p>
                   {isTeacher() && (
                     <div className="empty-actions">
                       <button 
                         className="btn-primary"
-                        onClick={() => setShowCreateClassworkModal(true)}
+                        onClick={() => setShowCreateLiveClassModal(true)}
                       >
-                        Create Your First Assignment
-                      </button>
-                      <button 
-                        className="btn-secondary"
-                        onClick={() => navigate(`/class/${id}/quiz/new`)}
-                      >
-                        Create a Quiz
+                        <FaVideo style={{marginRight: '8px'}} />
+                        Schedule First Live Class
                       </button>
                     </div>
                   )}
@@ -585,62 +587,22 @@ export default function ClassDetails() {
         </section>
       )}
 
-      {/* CREATE CLASSWORK MODAL */}
-      {showCreateClassworkModal && (
+      {/* CREATE LIVE CLASS MODAL */}
+      {showCreateLiveClassModal && (
         <div className="modal-overlay">
           <div className="modal-content large-modal">
             <div className="modal-header">
-              <h2>Create Classwork</h2>
-              <button className="close-btn" onClick={resetClassworkForm}>×</button>
+              <h2>Schedule Live Class</h2>
+              <button className="close-btn" onClick={resetLiveClassForm}>×</button>
             </div>
             
-            {/* Type Selection */}
-            <div className="type-selection">
-              <label>Type</label>
-              <div className="type-grid">
-                <button 
-                  type="button"
-                  className={`type-btn ${classworkType === 'assignment' ? 'active' : ''}`}
-                  onClick={() => setClassworkType('assignment')}
-                >
-                  <span>📝</span>
-                  Assignment
-                </button>
-                <button 
-                  type="button"
-                  className={`type-btn ${classworkType === 'quiz' ? 'active' : ''}`}
-                  onClick={() => setClassworkType('quiz')}
-                >
-                  <span>❓</span>
-                  Quiz
-                </button>
-                <button 
-                  type="button"
-                  className={`type-btn ${classworkType === 'material' ? 'active' : ''}`}
-                  onClick={() => setClassworkType('material')}
-                >
-                  <span>📎</span>
-                  Material
-                </button>
-                <button 
-                  type="button"
-                  className={`type-btn ${classworkType === 'question' ? 'active' : ''}`}
-                  onClick={() => setClassworkType('question')}
-                >
-                  <span>💬</span>
-                  Question
-                </button>
-              </div>
-            </div>
-
-            {/* Form Fields */}
             <div className="form-group">
               <label>Title *</label>
               <input
                 type="text"
-                placeholder="Enter title"
-                value={classworkTitle}
-                onChange={(e) => setClassworkTitle(e.target.value)}
+                placeholder="Enter live class title"
+                value={liveClassTitle}
+                onChange={(e) => setLiveClassTitle(e.target.value)}
                 required
               />
             </div>
@@ -648,50 +610,39 @@ export default function ClassDetails() {
             <div className="form-group">
               <label>Description (optional)</label>
               <textarea
-                placeholder="Enter description"
-                value={classworkDescription}
-                onChange={(e) => setClassworkDescription(e.target.value)}
+                placeholder="What will this live class cover?"
+                value={liveClassDescription}
+                onChange={(e) => setLiveClassDescription(e.target.value)}
                 rows="3"
               />
             </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label>Points (optional)</label>
-                <input
-                  type="number"
-                  placeholder="Points"
-                  value={classworkPoints}
-                  onChange={(e) => setClassworkPoints(e.target.value)}
-                />
-              </div>
-              
-              <div className="form-group">
-                <label>Due Date (optional)</label>
-                <input
-                  type="datetime-local"
-                  value={classworkDueDate}
-                  onChange={(e) => setClassworkDueDate(e.target.value)}
-                />
-              </div>
+            <div className="form-group">
+              <label>Schedule Time (optional)</label>
+              <input
+                type="datetime-local"
+                value={liveClassSchedule}
+                onChange={(e) => setLiveClassSchedule(e.target.value)}
+              />
+              <small>Leave empty to schedule for later</small>
             </div>
 
             <div className="modal-actions">
               <button 
                 type="button" 
-                onClick={resetClassworkForm}
-                disabled={creatingClasswork}
+                onClick={resetLiveClassForm}
+                disabled={creatingLiveClass}
                 className="btn-secondary"
               >
                 Cancel
               </button>
               <button 
                 type="button" 
-                onClick={handleCreateClasswork}
+                onClick={handleCreateLiveClass}
                 className="btn-primary"
-                disabled={!classworkTitle.trim() || creatingClasswork}
+                disabled={!liveClassTitle.trim() || creatingLiveClass}
               >
-                {creatingClasswork ? "Creating..." : "Create"}
+                {creatingLiveClass ? "Scheduling..." : "Schedule Live Class"}
               </button>
             </div>
           </div>

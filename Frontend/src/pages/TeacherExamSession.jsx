@@ -1,4 +1,4 @@
-// TeacherExamSession.jsx - COMPLETE FIXED VERSION WITH PROCTORING ALERTS
+// TeacherExamSession.jsx - UPDATED VERSION WITHOUT ASYNC TIMER LOGIC
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
@@ -13,15 +13,12 @@ export default function TeacherExamSession() {
   // State Management
   const [exam, setExam] = useState(null);
   const [students, setStudents] = useState([]);
-  const [timeLeft, setTimeLeft] = useState(10);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sessionStarted, setSessionStarted] = useState(false);
   const [socketStatus, setSocketStatus] = useState('connecting');
   const [socket, setSocket] = useState(null);
   const [studentStreams, setStudentStreams] = useState({});
   const [peerConnections, setPeerConnections] = useState({});
-  
   const [studentAttempts, setStudentAttempts] = useState({});
 
   // Chat State
@@ -30,10 +27,8 @@ export default function TeacherExamSession() {
   const [showChat, setShowChat] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Timer Control State
+  // Timer Control State - REMOVED ASYNC TIMER STATES
   const [showTimerControls, setShowTimerControls] = useState(false);
-  const [timerEditMode, setTimerEditMode] = useState(false);
-  const [customTime, setCustomTime] = useState({ hours: 1, minutes: 0, seconds: 0 });
 
   // PROCTORING CONTROLS POPUP STATE
   const [showProctoringControls, setShowProctoringControls] = useState(false);
@@ -44,7 +39,6 @@ export default function TeacherExamSession() {
   const [expandedAlerts, setExpandedAlerts] = useState({});
 
   // Refs
-  const timerRef = useRef(null);
   const videoRefs = useRef({});
   const socketRef = useRef(null);
   const activeConnections = useRef(new Set());
@@ -150,7 +144,7 @@ export default function TeacherExamSession() {
 
   // ==================== PROCTORING CONTROLS FUNCTIONS ====================
   const openProctoringControls = (student) => {
-    console.log(' Opening proctoring controls for:', student);
+    console.log('🎯 Opening proctoring controls for:', student);
     setSelectedStudent(student);
     setShowProctoringControls(true);
   };
@@ -161,6 +155,8 @@ export default function TeacherExamSession() {
   };
 
   // ==================== TIMER CONTROL FUNCTIONS ====================
+  // REMOVED: startTimerEdit, cancelTimerEdit, handleTimeInputChange, applyCustomTime, addTime, pauseTimer, resumeTimer, resetTimer
+
   const toggleTimerControls = () => {
     setShowTimerControls(!showTimerControls);
     if (showProctoringControls) {
@@ -168,65 +164,12 @@ export default function TeacherExamSession() {
     }
   };
 
-  const startTimerEdit = () => {
-    const hrs = Math.floor(timeLeft / 3600);
-    const mins = Math.floor((timeLeft % 3600) / 60);
-    const secs = timeLeft % 60;
-    
-    setCustomTime({
-      hours: hrs,
-      minutes: mins,
-      seconds: secs
-    });
-    setTimerEditMode(true);
-    setShowTimerControls(false);
-  };
-
-  const cancelTimerEdit = () => {
-    setTimerEditMode(false);
-  };
-
-  const handleTimeInputChange = (field, value) => {
-    const numValue = parseInt(value) || 0;
-    
-    let limitedValue = numValue;
-    if (field === 'hours') limitedValue = Math.min(23, Math.max(0, numValue));
-    if (field === 'minutes') limitedValue = Math.min(59, Math.max(0, numValue));
-    if (field === 'seconds') limitedValue = Math.min(59, Math.max(0, numValue));
-    
-    setCustomTime(prev => ({
-      ...prev,
-      [field]: limitedValue
-    }));
-  };
-
-  // ==================== TIMER SYNC FUNCTIONS ====================
-  const broadcastTimeUpdate = useCallback((newTime, runningState = null) => {
-    if (socketRef.current) {
-      const broadcastData = {
-        roomId: `exam-${examId}`,
-        timeLeft: newTime,
-        isTimerRunning: runningState !== null ? runningState : isTimerRunning,
-        timestamp: Date.now(),
-        teacherName: 'Teacher'
-      };
-      
-      socketRef.current.emit('exam-time-update', broadcastData);
-      console.log('🕒 Broadcasting time to students:', {
-        time: newTime,
-        running: runningState !== null ? runningState : isTimerRunning,
-        formatted: formatTime(newTime)
-      });
-    }
-  }, [examId, isTimerRunning]);
-
-  // ==================== END EXAM SESSION FUNCTION ====================
   const handleEndExamSession = async () => {
     // ✅ TRY BOTH SOURCES
     const examIdFromState = exam?._id?.toString();
     const examIdFromParams = examId; // from useParams()
     
-    console.log('🔍 Exam IDs for ending session:', {
+    console.log('🔍 Exam IDs:', {
       fromState: examIdFromState,
       fromParams: examIdFromParams,
       examState: exam
@@ -243,44 +186,13 @@ export default function TeacherExamSession() {
       return;
     }
     
-    if (!window.confirm('Are you sure you want to end the exam session? All students will be disconnected immediately.')) {
-      return;
-    }
-    
-    console.log('🛑 Teacher ending exam session:', currentExamId);
+    console.log('🔍 Ending session with examId:', currentExamId);
     
     try {
-      // First call API to end session
       const response = await api.post(`/exams/${currentExamId}/end-session`);
       
       if (response.data.success) {
-        console.log('✅ Session ended successfully via API');
-        
-        // Notify all students to disconnect
-        if (socketRef.current) {
-          // Send exam-ended event to all students in the room
-          socketRef.current.emit('exam-ended', {
-            roomId: `exam-${currentExamId}`,
-            examId: currentExamId,
-            message: 'Exam session has been ended by teacher',
-            endedAt: new Date().toISOString(),
-            forcedExit: true
-          });
-          
-          // Also send broadcast for live class ending
-          socketRef.current.emit('broadcast-live-class-end', {
-            examId: currentExamId,
-            classId: exam?.classId?._id,
-            endedAt: new Date().toISOString()
-          });
-        }
-        
-        // ✅ Clean up all peer connections and streams
-        cleanupAllConnections();
-        
-        // Clear all student states
-        setStudents([]);
-        setStudentStreams({});
+        console.log("✅ Session ended successfully");
         
         // ✅ Update exam state
         const endedAt = new Date();
@@ -290,19 +202,39 @@ export default function TeacherExamSession() {
           endedAt: endedAt
         }));
         
+        // ✅ Notify socket
+        if (socketRef.current) {
+          socketRef.current.emit('broadcast-live-class-end', {
+            examId: currentExamId,
+            classId: exam?.classId?._id,
+            endedAt: endedAt.toISOString()
+          });
+
+          socketRef.current.emit('exam-ended', {
+            roomId: `exam-${currentExamId}`,
+            examId: currentExamId,
+            message: 'Live class has been ended by teacher',
+            endedAt: endedAt.toISOString(),
+            forcedExit: true
+          });
+        }
+        
         // ✅ Clear timer caches
+        if (socketRef.current) {
+          socketRef.current.emit('clear-timer-cache', {
+            examId: currentExamId,
+            reason: 'session_ended'
+          });
+        }
+        
         localStorage.removeItem(`timer-${currentExamId}`);
         localStorage.removeItem(`last-save-${currentExamId}`);
         
-        alert('✅ Exam session ended! All students have been disconnected.');
+        alert('✅ Exam session ended! Students cannot join anymore.');
         
-        // Navigate back after a short delay
         setTimeout(() => {
           navigate('/dashboard');
         }, 2000);
-        
-      } else {
-        throw new Error(response.data.message || 'Failed to end session');
       }
     } catch (error) {
       console.error('❌ Failed to end exam session:', error);
@@ -313,398 +245,38 @@ export default function TeacherExamSession() {
         errorMessage: error.message
       });
       
-      let errorMessage = 'Failed to end exam session';
-      if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-      
-      alert('❌ ' + errorMessage);
+      alert('❌ Failed to end exam session. Please check console for details.');
     }
   };
 
-  // ==================== FORCE DISCONNECT INDIVIDUAL STUDENT ====================
-  const forceDisconnectStudent = (studentSocketId, studentName) => {
-    if (!window.confirm(`Force disconnect ${studentName}? They will need to rejoin.`)) {
-      return;
-    }
-    
-    if (socketRef.current) {
-      socketRef.current.emit('force-disconnect-student', {
-        studentSocketId: studentSocketId,
-        roomId: `exam-${examId}`,
-        reason: 'Teacher forced disconnect'
-      });
-      
-      // Clean up local connection
-      cleanupStudentConnection(studentSocketId);
-      
-      // Update student status
-      setStudents(prev => prev.map(student => 
-        student.socketId === studentSocketId 
-          ? { 
-              ...student, 
-              isConnected: false,
-              connectionStatus: 'disconnected',
-              cameraEnabled: false
-            }
-          : student
-      ));
-      
-      alert(`✅ ${studentName} has been disconnected`);
-    }
-  };
-
-  // ==================== CONNECTION CLEANUP FUNCTIONS ====================
-  const cleanupStudentConnection = (socketId) => {
-    console.log('🧹 Cleaning up connection for:', socketId);
-    
-    activeConnections.current.delete(socketId);
-    
-    if (peerConnections[socketId]) {
-      const pc = peerConnections[socketId];
-      try {
-        pc.close();
-      } catch (error) {
-        console.warn('Error closing peer connection:', error);
-      }
-      setPeerConnections(prev => {
-        const newPCs = { ...prev };
-        delete newPCs[socketId];
-        return newPCs;
-      });
-    }
-    
-    if (studentStreams[socketId]) {
-      const stream = studentStreams[socketId];
-      if (stream && stream.getTracks) {
-        stream.getTracks().forEach(track => {
-          try {
-            track.stop();
-          } catch (error) {
-            console.warn('Error stopping track:', error);
-          }
-        });
-      }
-      setStudentStreams(prev => {
-        const newStreams = { ...prev };
-        delete newStreams[socketId];
-        return newStreams;
-      });
-    }
-    
-    if (videoRefs.current[socketId]) {
-      const videoElement = videoRefs.current[socketId];
-      if (videoElement) {
-        videoElement.srcObject = null;
-      }
-      delete videoRefs.current[socketId];
-    }
-  };
-
-  const cleanupAllConnections = () => {
-    console.log('🧹 Cleaning up ALL peer connections and streams');
-    
-    // Close all peer connections
-    Object.keys(peerConnections).forEach(socketId => {
-      if (peerConnections[socketId]) {
-        try {
-          peerConnections[socketId].close();
-        } catch (err) {
-          console.warn('Error closing peer connection:', err);
-        }
-      }
-    });
-    
-    // Stop all media streams
-    Object.values(studentStreams).forEach(stream => {
-      if (stream && stream.getTracks) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    });
-    
-    // Clear all video elements
-    Object.values(videoRefs.current).forEach(videoElement => {
-      if (videoElement) {
-        videoElement.srcObject = null;
-      }
-    });
-    
-    // Clear all states
-    setPeerConnections({});
-    setStudentStreams({});
-    videoRefs.current = {};
-    activeConnections.current.clear();
-  };
-
-  // ==================== TIMER CONTROL ====================
-  // Sa timer effect, siguraduhing nagba-broadcast kapag nag-start
-  useEffect(() => {
-    console.log('⏰ Teacher timer effect running:', { isTimerRunning, timeLeft });
-    
-    if (isTimerRunning && timeLeft > 0) {
-      // Clear any existing interval first
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      
-      timerRef.current = setInterval(() => {
-        setTimeLeft(prev => {
-          const newTime = prev - 1;
-          console.log('⏰ Timer tick:', { previous: prev, newTime });
-          
-          // Auto-end exam when time reaches 0
-          if (newTime <= 0) {
-            console.log('⏰ Time up! Auto-ending exam');
-            clearInterval(timerRef.current);
-            handleEndExamSession();
-            return 0;
-          }
-          
-          let lastBroadcastTime = 0;
-          
-          if (socketRef.current && socketRef.current.connected) {
-            const now = Date.now();
-            // ✅ THROTTLE BROADCASTS - Only send every 3 seconds
-            if (now - lastBroadcastTime > 3000) {
-              socketRef.current.emit('exam-time-update', {
-                roomId: `exam-${examId}`,
-                timeLeft: newTime,
-                isTimerRunning: true,
-                timestamp: now,
-                teacherName: 'Teacher'
-              });
-              lastBroadcastTime = now;
-            }
-          }
-          
-          return newTime;
-        });
-      }, 1000);
-    } else {
-      // Clear interval when timer is paused or time is up
-      if (timerRef.current) {
-        console.log('⏰ Clearing timer interval');
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    }
-
-    return () => {
-      if (timerRef.current) {
-        console.log('⏰ Cleaning up timer interval');
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [isTimerRunning, timeLeft, examId]);
-
-  // ==================== EXAM SESSION MANAGEMENT ====================
+  // ==================== LIVE CLASS START FUNCTION ====================
   const handleStartExam = async () => {
     try {
-      console.log(' Starting exam session...');
+      console.log('🚀 Starting live class session...');
       
-      // ✅ USE THE CORRECT TIMER FROM STATE (not from exam data)
-      let initialTime = timeLeft;
-      
-      // If timer is 10 minutes (default), check if we should use exam timer
-      if (timeLeft === 600 || timeLeft === 10) {
-        if (exam?.timerSettings?.totalSeconds > 0) {
-          initialTime = exam.timerSettings.totalSeconds;
-          console.log("⏰ Using timer from quiz settings:", initialTime);
-        } else if (exam?.timeLimit > 0) {
-          initialTime = exam.timeLimit * 60;
-          console.log("⏰ Using timer from timeLimit:", initialTime);
-        }
-        setTimeLeft(initialTime); // Update state
-      }
-      
-      console.log("✅ Starting with timer:", initialTime, "seconds (", formatTime(initialTime), ")");
+      // ✅ LIVE CLASS HAS NO TIMER
+      const initialTime = 0; // No timer for live classes
       
       const response = await startExamSession(examId);
       if (response.success) {
         setSessionStarted(true);
-        setIsTimerRunning(true);
         
-        // ✅ BROADCAST CORRECT TIMER
+        // ✅ BROADCAST LIVE CLASS START
         if (socketRef.current) {
-          socketRef.current.emit('exam-time-update', {
-            roomId: `exam-${examId}`,
-            timeLeft: initialTime,
-            isTimerRunning: true,
-            timestamp: Date.now(),
+          socketRef.current.emit('broadcast-live-class-start', {
+            classId: exam?.classId,
+            examId: examId,
+            examTitle: exam?.title || 'Live Class',
             teacherName: 'Teacher'
           });
           
-          console.log('✅ Exam started with timer:', formatTime(initialTime));
-          alert(`✅ Exam started! Timer: ${formatTime(initialTime)}`);
+          console.log('✅ Live class started!');
+          alert('✅ Live class started! Students can now join.');
         }
       }
     } catch (error) {
-      console.error('Failed to start exam:', error);
-      alert('Failed to start exam session');
-    }
-  };
-
-  // ==================== TIMER CONTROL FUNCTIONS ====================
-  const applyCustomTime = () => {
-    const totalSeconds = (customTime.hours * 3600) + (customTime.minutes * 60) + customTime.seconds;
-    
-    if (totalSeconds <= 0) {
-      alert('Please enter a valid time (greater than 0 seconds)');
-      return;
-    }
-
-    console.log('⏰ Teacher setting new time:', {
-      hours: customTime.hours,
-      minutes: customTime.minutes,
-      seconds: customTime.seconds,
-      totalSeconds: totalSeconds,
-      formatted: formatTime(totalSeconds)
-    });
-
-    setTimeLeft(totalSeconds);
-    setTimerEditMode(false);
-    
-    // ✅ BROADCAST NEW TIME TO ALL STUDENTS IMMEDIATELY
-    if (socketRef.current) {
-      socketRef.current.emit('exam-time-update', {
-        roomId: `exam-${examId}`,
-        timeLeft: totalSeconds,
-        isTimerRunning: isTimerRunning,
-        timestamp: Date.now(),
-        teacherName: 'Teacher'
-      });
-    }
-    
-    alert(`✅ Timer set to ${formatTime(totalSeconds)}. All students will see this time.`);
-  };
-
-  const addTime = (minutes) => {
-    // If timer is 10 minutes (default), check if we should use exam's original timer
-    let currentTime = timeLeft;
-    
-    if (timeLeft === 600 || timeLeft === 10) {
-      // Try to get original timer from exam
-      if (exam?.timerSettings?.totalSeconds > 0) {
-        currentTime = exam.timerSettings.totalSeconds;
-        console.log("🔄 Switching from default 10min to original timer:", currentTime);
-        setTimeLeft(currentTime);
-      }
-    }
-    
-    const additionalSeconds = minutes * 60;
-    const newTime = currentTime + additionalSeconds;
-    
-    console.log('➕ Adding time:', {
-      currentTime: currentTime,
-      additionalMinutes: minutes,
-      newTime: newTime,
-      formatted: formatTime(newTime)
-    });
-
-    setTimeLeft(newTime);
-    
-    // ✅ CRITICAL: Update the room state immediately
-    if (socketRef.current) {
-      // ✅ BROADCAST UPDATED TIME WITH FORCE FLAG
-      socketRef.current.emit('exam-time-update', {
-        roomId: `exam-${examId}`,
-        timeLeft: newTime,
-        isTimerRunning: isTimerRunning,
-        timestamp: Date.now(),
-        teacherName: 'Teacher',
-        action: 'add_time', // Add action type
-        additionalMinutes: minutes
-      });
-      
-      // ✅ ALSO SEND DIRECT TIME SYNC REQUEST
-      setTimeout(() => {
-        socketRef.current.emit('force-timer-sync', {
-          roomId: `exam-${examId}`,
-          timeLeft: newTime,
-          isTimerRunning: isTimerRunning,
-          forceUpdate: true
-        });
-      }, 100);
-    }
-    
-    alert(`✅ Added ${minutes} minutes. New time: ${formatTime(newTime)}`);
-  };
-
-  const pauseTimer = () => {
-    console.log('⏸️ Teacher pausing timer');
-    setIsTimerRunning(false);
-    setShowTimerControls(false);
-    
-    // ✅ SEND TO SERVER FOR PERSISTENCE
-    if (socketRef.current) {
-      socketRef.current.emit('pause-exam-timer', {
-        roomId: `exam-${examId}`,
-        examId: examId
-      });
-    }
-    
-    // Clear the interval immediately
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  };
-
-  const resumeTimer = () => {
-    console.log('▶️ Teacher resuming timer');
-    setIsTimerRunning(true);
-    setShowTimerControls(false);
-    
-    // ✅ SEND TO SERVER FOR PERSISTENCE
-    if (socketRef.current) {
-      socketRef.current.emit('resume-exam-timer', {
-        roomId: `exam-${examId}`,
-        examId: examId
-      });
-    }
-    
-    // ✅ BROADCAST RESUME STATE IMMEDIATELY
-    if (socketRef.current) {
-      socketRef.current.emit('exam-time-update', {
-        roomId: `exam-${examId}`,
-        timeLeft: timeLeft,
-        isTimerRunning: true,
-        timestamp: Date.now(),
-        teacherName: 'Teacher'
-      });
-    }
-  };
-
-  const resetTimer = (customOriginalTime = null) => {
-    if (!window.confirm('Are you sure you want to reset the timer to the original exam duration?')) {
-      return;
-    }
-    
-    const originalTime = customOriginalTime || 
-                        (exam?.timerSettings?.totalSeconds || 
-                         (exam?.timeLimit ? exam.timeLimit * 60 : 600));
-    
-    console.log('🔄 Resetting timer to original:', {
-      originalTime: originalTime,
-      formatted: formatTime(originalTime)
-    });
-
-    setTimeLeft(originalTime);
-    setIsTimerRunning(false);
-    setShowTimerControls(false);
-    
-    // ✅ BROADCAST RESET TIME IMMEDIATELY
-    if (socketRef.current) {
-      socketRef.current.emit('exam-time-update', {
-        roomId: `exam-${examId}`,
-        timeLeft: originalTime,
-        isTimerRunning: false,
-        timestamp: Date.now(),
-        teacherName: 'Teacher'
-      });
+      console.error('Failed to start live class:', error);
+      alert('Failed to start live class session');
     }
   };
 
@@ -752,7 +324,6 @@ export default function TeacherExamSession() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // ✅ ADD THIS FUNCTION TO FIX THE ERROR
   const toggleChat = () => {
     setShowChat(prev => {
       if (!prev) {
@@ -812,122 +383,10 @@ export default function TeacherExamSession() {
     });
 
     // Add to local messages immediately
-    setMessages(prev => [...prev, messageData]);
+    
     setNewMessage('');
     
     console.log('📤 Teacher sent message:', messageData);
-  };
-
-  // ==================== STUDENT MANAGEMENT FUNCTIONS ====================
-  const handleStudentJoined = (data) => {
-    console.log('Student joined:', data);
-    
-    setStudents(prev => {
-      const exists = prev.find(s => s.socketId === data.socketId);
-      if (!exists) {
-        return [...prev, {
-          studentId: String(data.studentId || data.socketId),
-          name: String(data.studentName || 'Student'),
-          email: String(data.studentEmail || ''),
-          socketId: data.socketId,
-          joinedAt: new Date(),
-          cameraEnabled: false,
-          _id: String(data.studentId || data.socketId),
-          isConnected: true,
-          connectionStatus: 'connected',
-          lastSeen: new Date(),
-          hasAlerts: false,
-          alertCount: 0
-        }];
-      }
-      return prev.map(student => 
-        student.socketId === data.socketId 
-          ? { 
-              ...student, 
-              isConnected: true,
-              connectionStatus: 'connected',
-              lastSeen: new Date()
-            }
-          : student
-      );
-    });
-
-    setTimeout(() => {
-      requestStudentCamera(data.socketId);
-    }, 1000);
-  };
-
-  const handleStudentLeft = (data) => {
-    console.log('🚪 Student left:', data);
-    setStudents(prev => prev.map(student => 
-      student.socketId === data.socketId 
-        ? { 
-            ...student, 
-            isConnected: false,
-            connectionStatus: 'disconnected',
-            cameraEnabled: false
-          }
-        : student
-    ));
-    cleanupStudentConnection(data.socketId);
-  };
-
-  const handleRoomParticipants = (data) => {
-    console.log('👥 Room participants:', data);
-    if (data.students && data.students.length > 0) {
-      const formattedStudents = data.students.map(student => ({
-        studentId: String(student.studentId || student.socketId),
-        name: String(student.studentName || 'Student'),
-        email: String(student.studentEmail || ''),
-        socketId: student.socketId,
-        joinedAt: new Date(),
-        cameraEnabled: false,
-        _id: String(student.studentId || student.socketId),
-        isConnected: true,
-        connectionStatus: 'connected',
-        lastSeen: new Date(),
-        hasAlerts: false,
-        alertCount: 0
-      }));
-      setStudents(formattedStudents);
-
-      formattedStudents.forEach((student, index) => {
-        setTimeout(() => {
-          requestStudentCamera(student.socketId);
-        }, 2000 + (index * 1000));
-      });
-    }
-  };
-
-  // ==================== CAMERA REQUEST MANAGEMENT ====================
-  const requestStudentCamera = (studentSocketId) => {
-    if (!isSocketConnected() || !studentSocketId) {
-      console.warn('⚠️ Socket not connected for camera request');
-      return;
-    }
-
-    if (studentStreams[studentSocketId]) {
-      console.log('✅ Already have stream for:', studentSocketId);
-      return;
-    }
-
-    if (activeConnections.current.has(studentSocketId)) {
-      console.log('⏳ Already processing camera for:', studentSocketId);
-      return;
-    }
-
-    console.log('📹 Requesting camera from student:', studentSocketId);
-    activeConnections.current.add(studentSocketId);
-    
-    socketRef.current.emit('request-student-camera', {
-      studentSocketId: studentSocketId,
-      roomId: `exam-${examId}`,
-      teacherSocketId: socketRef.current.id
-    });
-    
-    setTimeout(() => {
-      activeConnections.current.delete(studentSocketId);
-    }, 15000);
   };
 
   // ==================== SOCKET.IO SETUP ====================
@@ -963,6 +422,27 @@ export default function TeacherExamSession() {
       });
     });
 
+    // Add this in your socket event listeners section
+    newSocket.on('student-attempts-update', (data) => {
+      console.log('📊 Student attempts updated:', data);
+      
+      setStudentAttempts(prev => ({
+        ...prev,
+        [data.studentSocketId]: data.attempts
+      }));
+      
+      // Update students list with attempts info
+      setStudents(prev => prev.map(student => 
+        student.socketId === data.studentSocketId 
+          ? { 
+              ...student, 
+              violations: data.attempts.currentAttempts,
+              attemptsLeft: data.attempts.attemptsLeft
+            }
+          : student
+      ));
+    });
+
     newSocket.on('connect_error', (error) => {
       console.error('❌ Teacher Socket connection failed:', error.message);
       setSocketStatus('error');
@@ -993,6 +473,7 @@ export default function TeacherExamSession() {
     });
 
     // Add this in your socket event listeners section
+    // DAGDAGIN ito sa teacher socket event listeners:
     newSocket.on('proctoring-violation', (data) => {
       console.log('📊 Proctoring violation received:', data);
       
@@ -1019,36 +500,6 @@ export default function TeacherExamSession() {
     newSocket.on('chat-message', handleChatMessage);
     newSocket.on('send-detection-settings', handleDetectionSettingsUpdate);
     
-    newSocket.on('student-time-request', (data) => {
-      console.log('🕒 Student requesting current time:', data.studentSocketId);
-      newSocket.emit('send-current-time', {
-        studentSocketId: data.studentSocketId,
-        timeLeft: timeLeft,
-        isTimerRunning: isTimerRunning
-      });
-    });
-
-    // Add student attempts update listener
-    newSocket.on('student-attempts-update', (data) => {
-      console.log('📊 Student attempts updated:', data);
-      
-      setStudentAttempts(prev => ({
-        ...prev,
-        [data.studentSocketId]: data.attempts
-      }));
-      
-      // Update students list with attempts info
-      setStudents(prev => prev.map(student => 
-        student.socketId === data.studentSocketId 
-          ? { 
-              ...student, 
-              violations: data.attempts.currentAttempts,
-              attemptsLeft: data.attempts.attemptsLeft
-            }
-          : student
-      ));
-    });
-
     setSocket(newSocket);
     socketRef.current = newSocket;
 
@@ -1064,9 +515,85 @@ export default function TeacherExamSession() {
     };
   }, [examId]);
 
+  // Handle detection settings updates
+  const handleDetectionSettingsUpdate = useCallback((data) => {
+    console.log('🎯 Sending detection settings to student:', data);
+    
+    if (socketRef.current && data.studentSocketId) {
+      socketRef.current.emit('update-detection-settings', {
+        studentSocketId: data.studentSocketId,
+        settings: data.settings,
+        customMessage: data.customMessage,
+        examId: examId
+      });
+    }
+  }, [examId]);
+
+  // DAGDAGIN ito after the main socket effect:
+  useEffect(() => {
+    if (!socketRef.current) return;
+
+    // ✅ Add proctoring alert listener separately
+    const currentSocket = socketRef.current;
+    
+    const proctoringHandler = (data) => {
+      handleProctoringAlert(data);
+    };
+    
+    currentSocket.on('proctoring-alert', proctoringHandler);
+    
+    return () => {
+      if (currentSocket) {
+        currentSocket.off('proctoring-alert', proctoringHandler);
+      }
+    };
+  }, [handleProctoringAlert]); // ✅ Now this is safe
+
+  // ==================== EXAM SESSION MANAGEMENT ====================
+  useEffect(() => {
+    const loadExamData = async () => {
+      try {
+        setLoading(true);
+        
+        const token = localStorage.getItem('token');
+        if (!token) {
+          navigate('/login');
+          return;
+        }
+        
+        const examResponse = await api.get(`/exams/${examId}/details`);
+        
+        if (examResponse.success) {
+          const examData = examResponse.data;
+          setExam(examData);
+          
+          // For live classes, no timer needed
+          if (examData.examType === 'live-class' || examData.isLiveClass) {
+            console.log("🎥 Live class loaded - no timer needed");
+          }
+          
+          setSessionStarted(examData.isActive || false);
+          
+          console.log('📊 Exam loaded:', {
+            examTitle: examData.title,
+            examType: examData.examType,
+            isLiveClass: examData.isLiveClass
+          });
+        }
+        
+      } catch (error) {
+        console.error('❌ Failed to load exam data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadExamData();
+  }, [examId, navigate]);
+
   // ==================== WEBRTC HANDLERS ====================
   const handleWebRTCOffer = async (data) => {
-    console.log('Received WebRTC offer from:', data.from);
+    console.log('🎯 Received WebRTC offer from:', data.from);
     
     if (peerConnections[data.from]) {
       cleanupStudentConnection(data.from);
@@ -1237,6 +764,87 @@ export default function TeacherExamSession() {
     }
   };
 
+  // ==================== STUDENT MANAGEMENT ====================
+  const handleStudentJoined = (data) => {
+    console.log('🎯 Student joined:', data);
+    
+    setStudents(prev => {
+      const exists = prev.find(s => s.socketId === data.socketId);
+      if (!exists) {
+        return [...prev, {
+          studentId: String(data.studentId || data.socketId),
+          name: String(data.studentName || 'Student'),
+          email: String(data.studentEmail || ''),
+          socketId: data.socketId,
+          joinedAt: new Date(),
+          cameraEnabled: false,
+          _id: String(data.studentId || data.socketId),
+          isConnected: true,
+          connectionStatus: 'connected',
+          lastSeen: new Date(),
+          hasAlerts: false,
+          alertCount: 0
+        }];
+      }
+      return prev.map(student => 
+        student.socketId === data.socketId 
+          ? { 
+              ...student, 
+              isConnected: true,
+              connectionStatus: 'connected',
+              lastSeen: new Date()
+            }
+          : student
+      );
+    });
+
+    setTimeout(() => {
+      requestStudentCamera(data.socketId);
+    }, 1000);
+  };
+
+  const handleStudentLeft = (data) => {
+    console.log('🚪 Student left:', data);
+    setStudents(prev => prev.map(student => 
+      student.socketId === data.socketId 
+        ? { 
+            ...student, 
+            isConnected: false,
+            connectionStatus: 'disconnected',
+            cameraEnabled: false
+          }
+        : student
+    ));
+    cleanupStudentConnection(data.socketId);
+  };
+
+  const handleRoomParticipants = (data) => {
+    console.log('👥 Room participants:', data);
+    if (data.students && data.students.length > 0) {
+      const formattedStudents = data.students.map(student => ({
+        studentId: String(student.studentId || student.socketId),
+        name: String(student.studentName || 'Student'),
+        email: String(student.studentEmail || ''),
+        socketId: student.socketId,
+        joinedAt: new Date(),
+        cameraEnabled: false,
+        _id: String(student.studentId || student.socketId),
+        isConnected: true,
+        connectionStatus: 'connected',
+        lastSeen: new Date(),
+        hasAlerts: false,
+        alertCount: 0
+      }));
+      setStudents(formattedStudents);
+
+      formattedStudents.forEach((student, index) => {
+        setTimeout(() => {
+          requestStudentCamera(student.socketId);
+        }, 2000 + (index * 1000));
+      });
+    }
+  };
+
   const handleCameraResponse = (data) => {
     console.log('📹 Camera response:', data);
     setStudents(prev => prev.map(student => 
@@ -1246,118 +854,89 @@ export default function TeacherExamSession() {
     ));
   };
 
-  // Handle detection settings updates
-  const handleDetectionSettingsUpdate = useCallback((data) => {
-    console.log('Sending detection settings to student:', data);
+  // ==================== CAMERA REQUEST MANAGEMENT ====================
+  const requestStudentCamera = (studentSocketId) => {
+    if (!isSocketConnected() || !studentSocketId) {
+      console.warn('⚠️ Socket not connected for camera request');
+      return;
+    }
+
+    if (studentStreams[studentSocketId]) {
+      console.log('✅ Already have stream for:', studentSocketId);
+      return;
+    }
+
+    if (activeConnections.current.has(studentSocketId)) {
+      console.log('⏳ Already processing camera for:', studentSocketId);
+      return;
+    }
+
+    console.log('📹 Requesting camera from student:', studentSocketId);
+    activeConnections.current.add(studentSocketId);
     
-    if (socketRef.current && data.studentSocketId) {
-      socketRef.current.emit('update-detection-settings', {
-        studentSocketId: data.studentSocketId,
-        settings: data.settings,
-        customMessage: data.customMessage,
-        examId: examId
+    socketRef.current.emit('request-student-camera', {
+      studentSocketId: studentSocketId,
+      roomId: `exam-${examId}`,
+      teacherSocketId: socketRef.current.id
+    });
+    
+    setTimeout(() => {
+      activeConnections.current.delete(studentSocketId);
+    }, 15000);
+  };
+
+  // ==================== CONNECTION CLEANUP ====================
+  const cleanupStudentConnection = (socketId) => {
+    console.log('🧹 Cleaning up connection for:', socketId);
+    
+    activeConnections.current.delete(socketId);
+    
+    if (peerConnections[socketId]) {
+      const pc = peerConnections[socketId];
+      try {
+        pc.close();
+      } catch (error) {
+        console.warn('Error closing peer connection:', error);
+      }
+      setPeerConnections(prev => {
+        const newPCs = { ...prev };
+        delete newPCs[socketId];
+        return newPCs;
       });
     }
-  }, [examId]);
-
-  // DAGDAGIN ito after the main socket effect:
-  useEffect(() => {
-    if (!socketRef.current) return;
-
-    // ✅ Add proctoring alert listener separately
-    const currentSocket = socketRef.current;
     
-    const proctoringHandler = (data) => {
-      handleProctoringAlert(data);
-    };
-    
-    currentSocket.on('proctoring-alert', proctoringHandler);
-    
-    return () => {
-      if (currentSocket) {
-        currentSocket.off('proctoring-alert', proctoringHandler);
+    if (studentStreams[socketId]) {
+      const stream = studentStreams[socketId];
+      if (stream && stream.getTracks) {
+        stream.getTracks().forEach(track => {
+          try {
+            track.stop();
+          } catch (error) {
+            console.warn('Error stopping track:', error);
+          }
+        });
       }
-    };
-  }, [handleProctoringAlert]); // ✅ Now this is safe
-
-  // ==================== EXAM SESSION MANAGEMENT ====================
-  useEffect(() => {
-    const loadExamData = async () => {
-      try {
-        setLoading(true);
-        
-        const token = localStorage.getItem('token');
-        if (!token) {
-          navigate('/login');
-          return;
-        }
-        
-        const examResponse = await api.get(`/exams/${examId}/details`);
-        
-        if (examResponse.success) {
-          const examData = examResponse.data;
-          setExam(examData);
-          
-          // ✅ FIXED: PRIORITIZE TIMER SETTINGS FROM DATABASE
-          let initialTime;
-          
-          // 1. First check timerSettings from quiz creation
-          if (examData.timerSettings && examData.timerSettings.totalSeconds > 0) {
-            initialTime = examData.timerSettings.totalSeconds;
-            console.log("⏰ Timer from quiz settings:", {
-              hours: examData.timerSettings.hours,
-              minutes: examData.timerSettings.minutes,
-              seconds: examData.timerSettings.seconds,
-              totalSeconds: examData.timerSettings.totalSeconds
-            });
-          } 
-          // 2. Check timeLimit (in minutes)
-          else if (examData.timeLimit && examData.timeLimit > 0) {
-            initialTime = examData.timeLimit * 60;
-            console.log("⏰ Timer from timeLimit:", examData.timeLimit, "minutes ->", initialTime, "seconds");
-          }
-          // 3. Check if it's a live class (no timer)
-          else if (examData.examType === 'live-class' || examData.isLiveClass) {
-            initialTime = 0; // No timer for live class
-            console.log("🎥 Live class - no timer needed");
-          }
-          // 4. Default fallback (SHOULD NOT HAPPEN if quiz was created properly)
-          else {
-            initialTime = 600; // 10 minutes
-            console.log("⚠️ Using default timer: 10 minutes - NO TIMER SETTINGS FOUND!");
-            
-            // Try to get timer from URL or localStorage as backup
-            const urlParams = new URLSearchParams(window.location.search);
-            const urlTimer = urlParams.get('timer');
-            if (urlTimer) {
-              initialTime = parseInt(urlTimer);
-              console.log("⏰ Using timer from URL:", initialTime);
-            }
-          }
-          
-          setTimeLeft(initialTime);
-          setSessionStarted(examData.isActive || false);
-          
-          console.log('📊 Exam loaded with FINAL timer:', {
-            examTitle: examData.title,
-            examType: examData.examType,
-            isLiveClass: examData.isLiveClass,
-            timerSettings: examData.timerSettings,
-            timeLimit: examData.timeLimit,
-            initialTime: initialTime,
-            formatted: formatTime(initialTime)
-          });
-        }
-        
-      } catch (error) {
-        console.error('❌ Failed to load exam data:', error);
-      } finally {
-        setLoading(false);
+      setStudentStreams(prev => {
+        const newStreams = { ...prev };
+        delete newStreams[socketId];
+        return newStreams;
+      });
+    }
+    
+    if (videoRefs.current[socketId]) {
+      const videoElement = videoRefs.current[socketId];
+      if (videoElement) {
+        videoElement.srcObject = null;
       }
-    };
+      delete videoRefs.current[socketId];
+    }
+  };
 
-    loadExamData();
-  }, [examId, navigate]);
+  const cleanupAllConnections = () => {
+    console.log('🧹 Cleaning up ALL connections');
+    Object.keys(peerConnections).forEach(cleanupStudentConnection);
+    activeConnections.current.clear();
+  };
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -1368,164 +947,32 @@ export default function TeacherExamSession() {
   
   const connectedStudents = students.filter(student => student.socketId && student.isConnected);
 
-  // Timer Controls Component
+  // Timer Controls Component - UPDATED FOR LIVE CLASSES ONLY
   const renderTimerControls = () => {
     if (!showTimerControls) return null;
-
-    // Get original timer from exam
-    const originalTime = exam?.timerSettings?.totalSeconds || 
-                        (exam?.timeLimit ? exam.timeLimit * 60 : 600);
 
     return (
       <div className="timer-controls-panel">
         <div className="timer-controls-header">
-          <h4>⏰ Timer Controls</h4>
+          <h4>⏰ Live Class Timer</h4>
           <button className="close-controls-btn" onClick={toggleTimerControls}>✕</button>
         </div>
         
         <div className="timer-controls-content">
-          {/* ✅ SHOW ORIGINAL TIMER FROM QUIZ SETUP */}
-          <div className="timer-original-settings">
-            <h5>📝 Original Timer Settings</h5>
-            <div className="original-timer-info">
-              <p><strong>Type:</strong> {exam?.examType === 'asynchronous' ? ' Asynchronous' : '🎥 Live Class'}</p>
-              <p><strong>Original Time:</strong> {formatTime(originalTime)}</p>
-              {exam?.timerSettings && (
-                <p><strong>Breakdown:</strong> {exam.timerSettings.hours}h {exam.timerSettings.minutes}m {exam.timerSettings.seconds}s</p>
-              )}
-            </div>
-          </div>
-
-          <div className="time-adjust-buttons">
-            <h5>➕ Add Time</h5>
-            <div className="time-buttons-grid">
-              <button className="time-btn" onClick={() => addTime(5)}>+5 min</button>
-              <button className="time-btn" onClick={() => addTime(10)}>+10 min</button>
-              <button className="time-btn" onClick={() => addTime(15)}>+15 min</button>
-              <button className="time-btn" onClick={() => addTime(30)}>+30 min</button>
-            </div>
-          </div>
-
-          <div className="timer-control-buttons">
-            <h5> Timer Controls</h5>
+          {/* LIVE CLASS SPECIFIC CONTROLS */}
+          <div className="live-class-controls">
+            <h5>🎥 Live Class Controls</h5>
             <div className="control-buttons-grid">
-              {isTimerRunning ? (
-                <button className="control-btn pause" onClick={pauseTimer}>
-                  ⏸️ Pause Timer
-                </button>
-              ) : (
-                <button className="control-btn resume" onClick={resumeTimer}>
-                  ▶️ Resume Timer
-                </button>
-              )}
-              <button className="control-btn edit" onClick={startTimerEdit}>
-                ⚙️ Set Custom Time
+              <button className="control-btn start" onClick={handleStartExam}>
+                🚀 Start Live Class
               </button>
-              <button className="control-btn reset" onClick={() => resetTimer(originalTime)}>
-                🔄 Reset to Original
+              <button className="control-btn end" onClick={handleEndExamSession}>
+                🛑 End Live Class
               </button>
             </div>
           </div>
           
-          <div className="timer-live-preview">
-            <h5>🕒 Current Timer State</h5>
-            <div className="timer-state-info">
-              <p><strong>Time:</strong> {formatTime(timeLeft)}</p>
-              <p><strong>Status:</strong> {isTimerRunning ? 'Running ▶️' : 'Paused ⏸️'}</p>
-              <p><strong>Connected Students:</strong> {connectedStudents.length}</p>
-              <button 
-                className="sync-now-btn"
-                onClick={() => {
-                  // Force sync all students
-                  if (socketRef.current) {
-                    socketRef.current.emit('force-timer-sync', {
-                      roomId: `exam-${examId}`,
-                      timeLeft: timeLeft,
-                      isTimerRunning: isTimerRunning,
-                      forceUpdate: true
-                    });
-                    alert('🔄 Syncing timer with all students...');
-                  }
-                }}
-              >
-                🔄 Sync Now with All Students
-              </button>
-            </div>
-          </div>
-
-          <div className="timer-info">
-            <p><strong>Current Time:</strong> {formatTime(timeLeft)}</p>
-            <p><strong>Status:</strong> {isTimerRunning ? 'Running' : 'Paused'}</p>
-            <p><strong>Students:</strong> Will see EXACTLY this time</p>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Timer Edit Modal
-  const renderTimerEditModal = () => {
-    if (!timerEditMode) return null;
-
-    return (
-      <div className="timer-edit-modal">
-        <div className="timer-edit-content">
-          <h3>⏰ Set Custom Time</h3>
-          <p className="edit-description">This time will be shown to ALL students</p>
-          
-          <div className="time-inputs">
-            <div className="time-input-group">
-              <label>Hours</label>
-              <input
-                type="number"
-                min="0"
-                max="23"
-                value={customTime.hours}
-                onChange={(e) => handleTimeInputChange('hours', e.target.value)}
-                className="time-input"
-              />
-            </div>
-            
-            <div className="time-input-group">
-              <label>Minutes</label>
-              <input
-                type="number"
-                min="0"
-                max="59"
-                value={customTime.minutes}
-                onChange={(e) => handleTimeInputChange('minutes', e.target.value)}
-                className="time-input"
-              />
-            </div>
-            
-            <div className="time-input-group">
-              <label>Seconds</label>
-              <input
-                type="number"
-                min="0"
-                max="59"
-                value={customTime.seconds}
-                onChange={(e) => handleTimeInputChange('seconds', e.target.value)}
-                className="time-input"
-              />
-            </div>
-          </div>
-
-          <div className="preview-time">
-            <strong>All students will see:</strong> 
-            <span className="preview-display">
-              {formatTime((customTime.hours * 3600) + (customTime.minutes * 60) + customTime.seconds)}
-            </span>
-          </div>
-
-          <div className="timer-edit-actions">
-            <button className="cancel-btn" onClick={cancelTimerEdit}>
-              Cancel
-            </button>
-            <button className="apply-btn" onClick={applyCustomTime}>
-              ✅ Apply to Everyone
-            </button>
-          </div>
+          {/* REMOVED ASYNC TIMER CONTROLS */}
         </div>
       </div>
     );
@@ -1539,7 +986,7 @@ export default function TeacherExamSession() {
       <div className="proctoring-controls-popup">
         <div className="proctoring-popup-content">
           <div className="proctoring-popup-header">
-            <h3>Proctoring Controls</h3>
+            <h3>🎯 Proctoring Controls</h3>
             <div className="student-info-popup">
               <div 
                 className="student-avatar-popup"
@@ -1577,7 +1024,7 @@ export default function TeacherExamSession() {
       <div className="global-proctoring-popup">
         <div className="global-proctoring-content">
           <div className="global-proctoring-header">
-            <h3>Global Proctoring Controls</h3>
+            <h3>🎯 Global Proctoring Controls</h3>
             <button 
               className="close-global-proctoring-btn" 
               onClick={() => setShowProctoringControls(false)}
@@ -1605,6 +1052,7 @@ export default function TeacherExamSession() {
   const renderProctoringAlerts = (student) => {
     const studentAlerts = proctoringAlerts[student.socketId] || [];
     
+    // ✅ FIX: Use the correct state variable name
     const attemptsData = studentAttempts[student.socketId];
     
     const isExpanded = expandedAlerts[student.socketId];
@@ -1736,14 +1184,6 @@ export default function TeacherExamSession() {
                   <span className="student-badge">#{index + 1}</span>
                   <span className="student-name">{getSafeStudentName(student)}</span>
                   
-                  {/* ADD FORCE DISCONNECT BUTTON IN HEADER */}
-                  <button 
-                    className="force-disconnect-btn"
-                    onClick={() => forceDisconnectStudent(student.socketId, getSafeStudentName(student))}
-                    title="Force disconnect student"
-                  >
-                    ⛔ Disconnect
-                  </button>
                 </div>
                 
                 <div className="video-container">
@@ -1857,7 +1297,7 @@ export default function TeacherExamSession() {
       <div className="teacher-exam-header">
         <div className="header-left">
           <button className="back-btn" onClick={() => navigate('/dashboard')}>
-            ← Back to Dashboard
+            Back to Dashboard
           </button>
           <div className="exam-info">
             <h1>{exam?.title || 'Exam Session'}</h1>
@@ -1866,15 +1306,15 @@ export default function TeacherExamSession() {
         </div>
         
         <div className="header-center">
-          {/* Timer with Controls */}
+          {/* Timer Controls - Simplified for Live Class */}
           <div className="timer-section">
             <div className="timer-display" onClick={toggleTimerControls}>
-              <span className="timer-text">{formatTime(timeLeft)}</span>
+              <span className="timer-text">🎥 LIVE CLASS</span>
             </div>
             <button 
               className="timer-controls-btn"
               onClick={toggleTimerControls}
-              title="Timer Controls"
+              title="Live Class Controls"
             >
               ⚙️
             </button>
@@ -1892,13 +1332,12 @@ export default function TeacherExamSession() {
         </div>
         
         <div className="header-right">
-
           <button 
             className="global-proctoring-btn"
             onClick={() => setShowProctoringControls(!showProctoringControls)}
             title="Global Proctoring Controls"
           >
-            Proctoring
+            🎯 Proctoring
           </button>
           
           {/* Chat Toggle Button */}
@@ -1914,11 +1353,11 @@ export default function TeacherExamSession() {
           
           {!sessionStarted ? (
             <button className="start-exam-btn" onClick={handleStartExam}>
-               Start Exam
+              🚀 Start Live Class
             </button>
           ) : (
             <button className="end-exam-btn" onClick={handleEndExamSession}>
-              ⏹️ End Exam
+              ⏹️ End Live Class
             </button>
           )}
         </div>
@@ -1943,11 +1382,8 @@ export default function TeacherExamSession() {
       {/* Chat Panel */}
       {renderChat()}
 
-      {/* Timer Controls Panel */}
+      {/* Timer Controls Panel - Now Live Class Controls */}
       {renderTimerControls()}
-
-      {/* Timer Edit Modal */}
-      {renderTimerEditModal()}
 
       {/* Global Proctoring Controls Popup */}
       {renderGlobalProctoringControls()}

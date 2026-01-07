@@ -454,4 +454,43 @@ router.get("/items-to-review", authMiddleware, async (req, res) => {
   }
 });
 
+// ✅ DELETE CLASS (Teacher only)
+router.delete("/:classId", authMiddleware, async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const userId = req.user.id;
+
+    const classData = await Class.findById(classId);
+
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        message: "Class not found"
+      });
+    }
+
+    // Only teacher (owner) can delete
+    if (classData.ownerId.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to delete this class"
+      });
+    }
+
+    await Class.findByIdAndDelete(classId);
+
+    res.json({
+      success: true,
+      message: "Class deleted successfully"
+    });
+  } catch (error) {
+    console.error("Delete class error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete class"
+    });
+  }
+});
+
+
 module.exports = router;

@@ -268,8 +268,17 @@ export const emailStudents = async (classId, emailData) => {
 };
 
 // ===== QUIZ/EXAM FUNCTIONS =====
+// ✅ UPDATE createQuiz to always create live class:
 export const createQuiz = async (classId, quizData) => {
-  const response = await api.post(`/exams/create/${classId}`, quizData);
+  // Force live-class type
+  const liveClassData = {
+    ...quizData,
+    examType: 'live-class',
+    isLiveClass: true,
+    timeLimit: 0
+  };
+  
+  const response = await api.post(`/exams/create/${classId}`, liveClassData);
   return response.data;
 };
 
@@ -322,6 +331,54 @@ export const getExams = async (classId) => {
 export const getExamDetails = async (examId) => {
   const response = await api.get(`/exams/${examId}/details`);
   return response.data;
+};
+
+// ===== PENDING EXAMS API FUNCTIONS =====
+// ✅ UPDATE pending exams to only return live classes:
+export const getPendingExams = async () => {
+  try {
+    const response = await api.get('/exams/student/pending-exams');
+    // Filter to only show live classes
+    if (response.data.success) {
+      const liveClassesOnly = response.data.data.map(classData => ({
+        ...classData,
+        pendingExams: classData.pendingExams.filter(exam => 
+          exam.examType === 'live-class'
+        )
+      })).filter(classData => classData.pendingExams.length > 0);
+      
+      return {
+        success: true,
+        data: liveClassesOnly,
+        totalPending: liveClassesOnly.reduce((sum, cls) => sum + cls.pendingExams.length, 0)
+      };
+    }
+    return response.data;
+  } catch (error) {
+    console.error('❌ Failed to fetch pending exams:', error);
+    return {
+      success: false,
+      data: [],
+      totalPending: 0
+    };
+  }
+};
+
+export const getClassPendingExams = async (classId) => {
+  try {
+    console.log('📋 Fetching pending exams for class:', classId);
+    const response = await api.get(`/exams/${classId}/pending-exams`);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Failed to fetch class pending exams:', error);
+    return {
+      success: false,
+      data: {
+        pendingCount: 0,
+        pendingExams: []
+      }
+    };
+  }
 };
 
 // ===== VIOLATION SUMMARY API =====

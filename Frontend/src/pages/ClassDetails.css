@@ -233,20 +233,7 @@
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
 }
 
-.classwork-card {
-  border: 1px solid #dadce0;
-  border-radius: 8px;
-  padding: 20px;
-  transition: all 0.2s;
-  background: white;
-  position: relative;
-}
 
-.classwork-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  transform: translateY(-2px);
-  border-color: #1a73e8;
-}
 
 .classwork-header {
   display: flex;
@@ -876,14 +863,6 @@ textarea {
   justify-content: center;
 }
 
-/* ✅ EMPTY STATE IMPROVEMENTS */
-.classwork-empty-state {
-  text-align: center;
-  padding: 60px 20px;
-  background: #f8f9fa;
-  border-radius: 12px;
-  border: 2px dashed #dadce0;
-}
 
 .empty-illustration {
   margin-bottom: 24px;

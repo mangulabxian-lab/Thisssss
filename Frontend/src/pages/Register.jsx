@@ -13,8 +13,8 @@ export default function Register() {
     email: "",
     username: "",
     password: "",
-    course: "",
-    section: "",
+    
+    
   });
 
   const [error, setError] = useState("");
@@ -65,8 +65,7 @@ export default function Register() {
     if (!validatePassword(form.password))
       return setError("❌ Password does not meet security requirements.");
 
-    if (!form.course || !form.section)
-      return setError("❌ Please provide your Course and Section.");
+   
 
     setLoading(true);
 
@@ -183,25 +182,6 @@ export default function Register() {
               required
             />
 
-            <input
-              type="text"
-              name="course"
-              placeholder="Course (ex: BSIT) *"
-              value={form.course}
-              onChange={handleChange}
-              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none"
-              required
-            />
-
-            <input
-              type="text"
-              name="section"
-              placeholder="Section (ex: 3A) *"
-              value={form.section}
-              onChange={handleChange}
-              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none"
-              required
-            />
 
             {/* reCAPTCHA */}
             <div className="flex justify-center">

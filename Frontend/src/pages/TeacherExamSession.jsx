@@ -1,4 +1,4 @@
-// TeacherExamSession.jsx - UPDATED VERSION WITHOUT ASYNC TIMER LOGIC
+// TeacherExamSession.jsx - UPDATED VERSION WITH TIMER FUNCTIONALITY
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
@@ -27,9 +27,6 @@ export default function TeacherExamSession() {
   const [showChat, setShowChat] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Timer Control State - REMOVED ASYNC TIMER STATES
-  const [showTimerControls, setShowTimerControls] = useState(false);
-
   // PROCTORING CONTROLS POPUP STATE
   const [showProctoringControls, setShowProctoringControls] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -38,11 +35,30 @@ export default function TeacherExamSession() {
   const [proctoringAlerts, setProctoringAlerts] = useState({});
   const [expandedAlerts, setExpandedAlerts] = useState({});
 
+  // ✅ TIMER STATES
+  const [timerSettings, setTimerSettings] = useState({
+    hasTimer: false,
+    duration: 0,
+    remaining: 0,
+    isRunning: false,
+    startedAt: null,
+    endsAt: null
+  });
+  const [showTimerModal, setShowTimerModal] = useState(false);
+  const [tempTimerSettings, setTempTimerSettings] = useState({
+    hours: 0,
+    minutes: 30,
+    seconds: 0
+  });
+
   // Refs
   const videoRefs = useRef({});
   const socketRef = useRef(null);
   const activeConnections = useRef(new Set());
   const messagesEndRef = useRef(null);
+  
+  // ✅ ADDED: Track sent message IDs to prevent duplicates
+  const sentMessageIds = useRef(new Set());
 
   // ==================== PROCTORING ALERTS FUNCTIONS ====================
   const handleProctoringAlert = useCallback((data) => {
@@ -110,60 +126,85 @@ export default function TeacherExamSession() {
     });
   }, [examId, students]);
 
-  // ==================== ALERTS MANAGEMENT FUNCTIONS ====================
-  const toggleAlertsDropdown = (studentSocketId) => {
-    setExpandedAlerts(prev => ({
+  // ==================== TIMER FUNCTIONS ====================
+  const calculateTotalSeconds = () => {
+    return (tempTimerSettings.hours * 3600) + 
+           (tempTimerSettings.minutes * 60) + 
+           tempTimerSettings.seconds;
+  };
+
+  const startTimer = () => {
+    if (!socketRef.current) return;
+    
+    const totalSeconds = calculateTotalSeconds();
+    if (totalSeconds <= 0) {
+      alert('Please set a valid timer duration');
+      return;
+    }
+    
+    socketRef.current.emit('start-exam-timer', {
+      examId: examId,
+      duration: totalSeconds
+    });
+    
+    setShowTimerModal(false);
+  };
+
+  const stopTimer = () => {
+    if (!socketRef.current) return;
+    
+    socketRef.current.emit('stop-exam-timer', { examId });
+    setTimerSettings(prev => ({
       ...prev,
-      [studentSocketId]: !prev[studentSocketId]
+      isRunning: false,
+      remaining: 0
     }));
   };
 
-  const clearStudentAlerts = (studentSocketId, e) => {
-    e.stopPropagation();
-    console.log('🗑️ Clearing alerts for student:', studentSocketId);
+  const formatTime = (seconds) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
     
-    setProctoringAlerts(prev => {
-      const updated = { ...prev };
-      delete updated[studentSocketId];
-      return updated;
-    });
-    
-    setExpandedAlerts(prev => {
-      const updated = { ...prev };
-      delete updated[studentSocketId];
-      return updated;
-    });
-    
-    // Update student status
-    setStudents(prev => prev.map(student => 
-      student.socketId === studentSocketId 
-        ? { ...student, hasAlerts: false, alertCount: 0 }
-        : student
-    ));
-  };
-
-  // ==================== PROCTORING CONTROLS FUNCTIONS ====================
-  const openProctoringControls = (student) => {
-    console.log('🎯 Opening proctoring controls for:', student);
-    setSelectedStudent(student);
-    setShowProctoringControls(true);
-  };
-
-  const closeProctoringControls = () => {
-    setShowProctoringControls(false);
-    setSelectedStudent(null);
-  };
-
-  // ==================== TIMER CONTROL FUNCTIONS ====================
-  // REMOVED: startTimerEdit, cancelTimerEdit, handleTimeInputChange, applyCustomTime, addTime, pauseTimer, resumeTimer, resetTimer
-
-  const toggleTimerControls = () => {
-    setShowTimerControls(!showTimerControls);
-    if (showProctoringControls) {
-      setShowProctoringControls(false);
+    if (hrs > 0) {
+      return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
   };
 
+  // ==================== LIVE CLASS START FUNCTION ====================
+  const handleStartExam = async () => {
+    try {
+      console.log('🚀 Starting live class session...');
+      
+      // 1. Start exam session
+      const response = await startExamSession(examId);
+      if (!response.success) throw new Error("Failed to start session");
+      
+      // 2. Set local state
+      setSessionStarted(true);
+      
+      // 3. Broadcast to ALL students immediately
+      if (socketRef.current) {
+        socketRef.current.emit('broadcast-exam-start', {
+          examId: examId,
+          message: "Live class started!",
+          startTime: new Date().toISOString()
+        });
+        
+        console.log('✅ Live class started');
+      }
+      
+      alert('✅ Live class started!');
+      
+    } catch (error) {
+      console.error('Failed to start live class:', error);
+      alert('Failed to start live class session');
+    }
+  };
+
+  // ==================== END EXAM SESSION ====================
   const handleEndExamSession = async () => {
     // ✅ TRY BOTH SOURCES
     const examIdFromState = exam?._id?.toString();
@@ -219,17 +260,6 @@ export default function TeacherExamSession() {
           });
         }
         
-        // ✅ Clear timer caches
-        if (socketRef.current) {
-          socketRef.current.emit('clear-timer-cache', {
-            examId: currentExamId,
-            reason: 'session_ended'
-          });
-        }
-        
-        localStorage.removeItem(`timer-${currentExamId}`);
-        localStorage.removeItem(`last-save-${currentExamId}`);
-        
         alert('✅ Exam session ended! Students cannot join anymore.');
         
         setTimeout(() => {
@@ -249,35 +279,48 @@ export default function TeacherExamSession() {
     }
   };
 
-  // ==================== LIVE CLASS START FUNCTION ====================
-  const handleStartExam = async () => {
-    try {
-      console.log('🚀 Starting live class session...');
-      
-      // ✅ LIVE CLASS HAS NO TIMER
-      const initialTime = 0; // No timer for live classes
-      
-      const response = await startExamSession(examId);
-      if (response.success) {
-        setSessionStarted(true);
-        
-        // ✅ BROADCAST LIVE CLASS START
-        if (socketRef.current) {
-          socketRef.current.emit('broadcast-live-class-start', {
-            classId: exam?.classId,
-            examId: examId,
-            examTitle: exam?.title || 'Live Class',
-            teacherName: 'Teacher'
-          });
-          
-          console.log('✅ Live class started!');
-          alert('✅ Live class started! Students can now join.');
-        }
-      }
-    } catch (error) {
-      console.error('Failed to start live class:', error);
-      alert('Failed to start live class session');
-    }
+  // ==================== ALERTS MANAGEMENT FUNCTIONS ====================
+  const toggleAlertsDropdown = (studentSocketId) => {
+    setExpandedAlerts(prev => ({
+      ...prev,
+      [studentSocketId]: !prev[studentSocketId]
+    }));
+  };
+
+  const clearStudentAlerts = (studentSocketId, e) => {
+    e.stopPropagation();
+    console.log('🗑️ Clearing alerts for student:', studentSocketId);
+    
+    setProctoringAlerts(prev => {
+      const updated = { ...prev };
+      delete updated[studentSocketId];
+      return updated;
+    });
+    
+    setExpandedAlerts(prev => {
+      const updated = { ...prev };
+      delete updated[studentSocketId];
+      return updated;
+    });
+    
+    // Update student status
+    setStudents(prev => prev.map(student => 
+      student.socketId === studentSocketId 
+        ? { ...student, hasAlerts: false, alertCount: 0 }
+        : student
+    ));
+  };
+
+  // ==================== PROCTORING CONTROLS FUNCTIONS ====================
+  const openProctoringControls = (student) => {
+    console.log('🎯 Opening proctoring controls for:', student);
+    setSelectedStudent(student);
+    setShowProctoringControls(true);
+  };
+
+  const closeProctoringControls = () => {
+    setShowProctoringControls(false);
+    setSelectedStudent(null);
   };
 
   // ==================== UTILITY FUNCTIONS ====================
@@ -305,20 +348,6 @@ export default function TeacherExamSession() {
     return socketRef.current && socketRef.current.connected;
   };
 
-  const formatTime = (seconds) => {
-    if (seconds === null || seconds === undefined) return '00:00';
-    
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    
-    if (hrs > 0) {
-      return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    } else {
-      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-  };
-
   // ==================== CHAT FUNCTIONS ====================
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -333,6 +362,7 @@ export default function TeacherExamSession() {
     });
   };
 
+  // ✅ FIXED: Improved handleChatMessage function with better duplicate prevention
   const handleChatMessage = useCallback((data) => {
     console.log('💬 Teacher received chat message:', data);
     
@@ -341,19 +371,46 @@ export default function TeacherExamSession() {
       return;
     }
 
-    const newMessage = {
-      id: data.message.id || Date.now().toString(),
+    // Create message object
+    const receivedMessage = {
+      id: data.message.id || `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       text: data.message.text,
-      sender: data.message.sender,
-      senderName: data.message.senderName || data.userName || 'Student',
+      sender: data.message.sender || 'student',
+      senderName: data.message.senderName || 'Student',
       timestamp: new Date(data.message.timestamp || Date.now()),
-      type: data.message.type || 'student'
+      type: data.message.type || 'chat',
+      socketId: data.message.socketId // Track which socket sent it
     };
     
-    console.log('💾 Adding message to teacher state:', newMessage);
+    console.log('💾 Processing message for teacher state:', receivedMessage);
     
     setMessages(prev => {
-      const updatedMessages = [...prev, newMessage];
+      // Check for duplicates using multiple criteria
+      const isDuplicate = prev.some(msg => {
+        // Check by ID if available
+        if (msg.id && receivedMessage.id && msg.id === receivedMessage.id) return true;
+        
+        // Check by content and timestamp (within 2 seconds)
+        if (msg.text === receivedMessage.text) {
+          const timeDiff = Math.abs(msg.timestamp - receivedMessage.timestamp);
+          if (timeDiff < 2000) return true;
+        }
+        
+        // Check if this is our own message that was already added locally
+        if (receivedMessage.sender === 'teacher' && sentMessageIds.current.has(receivedMessage.id)) {
+          sentMessageIds.current.delete(receivedMessage.id);
+          return true;
+        }
+        
+        return false;
+      });
+      
+      if (isDuplicate) {
+        console.log('🛑 Skipping duplicate message');
+        return prev;
+      }
+      
+      const updatedMessages = [...prev, receivedMessage];
       console.log('📝 Teacher messages count:', updatedMessages.length);
       return updatedMessages;
     });
@@ -363,29 +420,40 @@ export default function TeacherExamSession() {
     }
   }, [showChat]);
 
+  // ✅ FIXED: handleSendMessage function - prevents duplication
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !socketRef.current) return;
 
+    // Generate a unique message ID
+    const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Track this message ID to prevent duplicates when it comes back via socket
+    sentMessageIds.current.add(messageId);
+
     const messageData = {
-      id: Date.now().toString(),
+      id: messageId, // Use unique ID
       text: newMessage.trim(),
       sender: 'teacher',
       senderName: 'Teacher',
-      timestamp: new Date(),
-      type: 'broadcast'
+      timestamp: new Date().toISOString(),
+      type: 'chat',
+      socketId: socketRef.current.id // Add teacher's socket ID
     };
 
-    // ✅ FIXED: Use consistent event name
-    socketRef.current.emit('send-chat-message', {
+    // Add to local state immediately for instant feedback
+    setMessages(prev => [...prev, {
+      ...messageData,
+      timestamp: new Date()
+    }]);
+    
+    // Send via socket
+    socketRef.current.emit('send-exam-chat-message', {
       roomId: `exam-${examId}`,
       message: messageData
     });
 
-    // Add to local messages immediately
-    
     setNewMessage('');
-    
     console.log('📤 Teacher sent message:', messageData);
   };
 
@@ -420,9 +488,39 @@ export default function TeacherExamSession() {
         userId: 'teacher',
         userRole: 'teacher'
       });
+
+      // ✅ TIMER HANDLERS
+      newSocket.on('timer-started', (data) => {
+        console.log('✅ Timer started:', data);
+        setTimerSettings(prev => ({
+          ...prev,
+          hasTimer: true,
+          duration: data.duration,
+          remaining: data.duration,
+          isRunning: true,
+          startedAt: data.startedAt,
+          endsAt: data.endsAt
+        }));
+      });
+
+      newSocket.on('timer-update', (data) => {
+        setTimerSettings(prev => ({
+          ...prev,
+          remaining: data.remaining
+        }));
+      });
+
+      newSocket.on('timer-ended', (data) => {
+        console.log('⏰ Timer ended:', data);
+        setTimerSettings(prev => ({
+          ...prev,
+          isRunning: false,
+          remaining: 0
+        }));
+      });
     });
 
-    // Add this in your socket event listeners section
+    // Student attempts update listener
     newSocket.on('student-attempts-update', (data) => {
       console.log('📊 Student attempts updated:', data);
       
@@ -472,8 +570,7 @@ export default function TeacherExamSession() {
       setSessionStarted(true);
     });
 
-    // Add this in your socket event listeners section
-    // DAGDAGIN ito sa teacher socket event listeners:
+    // Proctoring violation listener
     newSocket.on('proctoring-violation', (data) => {
       console.log('📊 Proctoring violation received:', data);
       
@@ -497,7 +594,8 @@ export default function TeacherExamSession() {
     newSocket.on('webrtc-answer', handleWebRTCAnswer);
     newSocket.on('ice-candidate', handleICECandidate);
     newSocket.on('camera-response', handleCameraResponse);
-    newSocket.on('chat-message', handleChatMessage);
+    newSocket.on('exam-chat-message', handleChatMessage); // Fixed handler
+
     newSocket.on('send-detection-settings', handleDetectionSettingsUpdate);
     
     setSocket(newSocket);
@@ -512,6 +610,8 @@ export default function TeacherExamSession() {
         socketRef.current = null;
       }
       cleanupAllConnections();
+      // Clear sent message IDs on cleanup
+      sentMessageIds.current.clear();
     };
   }, [examId]);
 
@@ -566,12 +666,6 @@ export default function TeacherExamSession() {
         if (examResponse.success) {
           const examData = examResponse.data;
           setExam(examData);
-          
-          // For live classes, no timer needed
-          if (examData.examType === 'live-class' || examData.isLiveClass) {
-            console.log("🎥 Live class loaded - no timer needed");
-          }
-          
           setSessionStarted(examData.isActive || false);
           
           console.log('📊 Exam loaded:', {
@@ -947,37 +1041,6 @@ export default function TeacherExamSession() {
   
   const connectedStudents = students.filter(student => student.socketId && student.isConnected);
 
-  // Timer Controls Component - UPDATED FOR LIVE CLASSES ONLY
-  const renderTimerControls = () => {
-    if (!showTimerControls) return null;
-
-    return (
-      <div className="timer-controls-panel">
-        <div className="timer-controls-header">
-          <h4>⏰ Live Class Timer</h4>
-          <button className="close-controls-btn" onClick={toggleTimerControls}>✕</button>
-        </div>
-        
-        <div className="timer-controls-content">
-          {/* LIVE CLASS SPECIFIC CONTROLS */}
-          <div className="live-class-controls">
-            <h5>🎥 Live Class Controls</h5>
-            <div className="control-buttons-grid">
-              <button className="control-btn start" onClick={handleStartExam}>
-                🚀 Start Live Class
-              </button>
-              <button className="control-btn end" onClick={handleEndExamSession}>
-                🛑 End Live Class
-              </button>
-            </div>
-          </div>
-          
-          {/* REMOVED ASYNC TIMER CONTROLS */}
-        </div>
-      </div>
-    );
-  };
-
   // PROCTORING CONTROLS POPUP
   const renderProctoringControlsPopup = () => {
     if (!showProctoringControls || !selectedStudent) return null;
@@ -1306,20 +1369,6 @@ export default function TeacherExamSession() {
         </div>
         
         <div className="header-center">
-          {/* Timer Controls - Simplified for Live Class */}
-          <div className="timer-section">
-            <div className="timer-display" onClick={toggleTimerControls}>
-              <span className="timer-text">🎥 LIVE CLASS</span>
-            </div>
-            <button 
-              className="timer-controls-btn"
-              onClick={toggleTimerControls}
-              title="Live Class Controls"
-            >
-              ⚙️
-            </button>
-          </div>
-          
           <div className="student-count">
             👥 {connectedStudents.length} Students
           </div>
@@ -1332,6 +1381,29 @@ export default function TeacherExamSession() {
         </div>
         
         <div className="header-right">
+          {/* TIMER SECTION */}
+          <div className="timer-section">
+            {timerSettings.hasTimer && timerSettings.isRunning ? (
+              <div className="timer-display active">
+                <span className="timer-icon">⏱️</span>
+                <span className="timer-text">
+                  {formatTime(timerSettings.remaining)}
+                </span>
+                <button className="stop-timer-btn" onClick={stopTimer} title="Stop Timer">
+                  ⏹️
+                </button>
+              </div>
+            ) : (
+              <button 
+                className="set-timer-btn"
+                onClick={() => setShowTimerModal(true)}
+                title="Set Exam Timer"
+              >
+                ⏱️ Set Timer
+              </button>
+            )}
+          </div>
+          
           <button 
             className="global-proctoring-btn"
             onClick={() => setShowProctoringControls(!showProctoringControls)}
@@ -1382,14 +1454,91 @@ export default function TeacherExamSession() {
       {/* Chat Panel */}
       {renderChat()}
 
-      {/* Timer Controls Panel - Now Live Class Controls */}
-      {renderTimerControls()}
-
       {/* Global Proctoring Controls Popup */}
       {renderGlobalProctoringControls()}
 
       {/* PROCTORING CONTROLS POPUP */}
       {renderProctoringControlsPopup()}
+
+      {/* TIMER MODAL */}
+      {showTimerModal && (
+        <div className="timer-modal-overlay" onClick={() => setShowTimerModal(false)}>
+          <div className="timer-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="timer-modal-header">
+              <h3>⏱️ Set Exam Timer</h3>
+              <button className="close-timer-modal" onClick={() => setShowTimerModal(false)}>×</button>
+            </div>
+            
+            <div className="timer-modal-body">
+              <p>Set time limit for this live class exam:</p>
+              
+              <div className="timer-inputs">
+                <div className="time-input-group">
+                  <label>Hours</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="23"
+                    value={tempTimerSettings.hours}
+                    onChange={(e) => setTempTimerSettings({
+                      ...tempTimerSettings, 
+                      hours: parseInt(e.target.value) || 0
+                    })}
+                    className="time-input"
+                  />
+                </div>
+                
+                <div className="time-input-group">
+                  <label>Minutes</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={tempTimerSettings.minutes}
+                    onChange={(e) => setTempTimerSettings({
+                      ...tempTimerSettings, 
+                      minutes: parseInt(e.target.value) || 0
+                    })}
+                    className="time-input"
+                  />
+                </div>
+                
+                <div className="time-input-group">
+                  <label>Seconds</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={tempTimerSettings.seconds}
+                    onChange={(e) => setTempTimerSettings({
+                      ...tempTimerSettings, 
+                      seconds: parseInt(e.target.value) || 0
+                    })}
+                    className="time-input"
+                  />
+                </div>
+              </div>
+              
+              <div className="timer-preview">
+                <strong>Total Duration:</strong>
+                <div className="preview-time">
+                  {`${tempTimerSettings.hours.toString().padStart(2, '0')}:${tempTimerSettings.minutes.toString().padStart(2, '0')}:${tempTimerSettings.seconds.toString().padStart(2, '0')}`}
+                  <span className="total-seconds">({calculateTotalSeconds()} seconds)</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="timer-modal-footer">
+              <button className="cancel-timer-btn" onClick={() => setShowTimerModal(false)}>
+                Cancel
+              </button>
+              <button className="start-timer-btn" onClick={startTimer}>
+                🚀 Start Timer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

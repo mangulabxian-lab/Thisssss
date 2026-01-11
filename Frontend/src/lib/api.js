@@ -1,4 +1,4 @@
-// src/lib/api.js - UPDATED VERSION WITH ANNOUNCEMENT FUNCTIONS
+// src/lib/api.js - UPDATED VERSION WITHOUT TIMER FUNCTIONS
 import axios from "axios";
 
 const api = axios.create({
@@ -274,8 +274,7 @@ export const createQuiz = async (classId, quizData) => {
   const liveClassData = {
     ...quizData,
     examType: 'live-class',
-    isLiveClass: true,
-    timeLimit: 0
+    isLiveClass: true
   };
   
   const response = await api.post(`/exams/create/${classId}`, liveClassData);
@@ -563,6 +562,12 @@ export const getAuthStatus = async () => {
 
 export const logoutUser = async () => {
   const response = await api.post('/auth/logout');
+  return response.data;
+};
+
+// ===== PASSWORD CHANGE API =====
+export const changePassword = async (passwordData) => {
+  const response = await api.put('/auth/change-password', passwordData);
   return response.data;
 };
 

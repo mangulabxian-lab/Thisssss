@@ -552,13 +552,7 @@ export default function ClassDetails() {
                   </svg>
                 </div>
                 <div className="empty-content">
-                  <h3 className="empty-title">No live classes yet</h3>
-                  <p className="empty-description">
-                    {isTeacher() 
-                      ? "Schedule your first live class to start interactive teaching sessions."
-                      : "Your teacher hasn't scheduled any live classes yet."
-                    }
-                  </p>
+                  
                   {isTeacher() && (
                     <div className="empty-actions">
                       <button 

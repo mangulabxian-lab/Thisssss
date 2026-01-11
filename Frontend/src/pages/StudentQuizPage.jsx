@@ -1,11 +1,11 @@
-// StudentQuizPage.jsx - UPDATED CAMERA VERSION
+// StudentQuizPage.jsx - UPDATED CAMERA VERSION WITH TIMER FUNCTIONALITY
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { getQuizForStudent, submitQuizAnswers } from '../lib/api';
+import api from '../lib/api'; // <-- ADDED THIS IMPORT
 import './StudentQuizPage.css';
 import StudentExamCamera from '../components/StudentExamCamera';
-
 
 // ==================== WAITING ROOM COMPONENT ====================
 const WaitingRoomComponent = React.memo(({ 
@@ -297,6 +297,125 @@ const WaitingRoomComponent = React.memo(({
             </ul>
           </div>
         )}
+      </div>
+    </div>
+  );
+});
+
+// ==================== EXAM WAITING ROOM COMPONENT ====================
+const ExamWaitingRoom = React.memo(({ 
+  examTitle, 
+  className, 
+  onCancel 
+}) => {
+  const [checkingStatus, setCheckingStatus] = useState(true);
+  const [status, setStatus] = useState(null);
+  const [lastChecked, setLastChecked] = useState(Date.now());
+  const { examId } = useParams();
+
+  const checkExamStatus = useCallback(async () => {
+    try {
+      setCheckingStatus(true);
+      const response = await api.get(`/exams/${examId}/can-enter`);
+      
+      if (response.success) {
+        setStatus(response.data);
+      }
+    } catch (error) {
+      console.error('Error checking exam status:', error);
+    } finally {
+      setCheckingStatus(false);
+      setLastChecked(Date.now());
+    }
+  }, [examId]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      checkExamStatus();
+    }, 5000);
+
+    checkExamStatus();
+
+    return () => clearInterval(interval);
+  }, [checkExamStatus]);
+
+  return (
+    <div className="exam-waiting-room">
+      <div className="waiting-room-content">
+        <div className="waiting-header">
+          <div className="waiting-icon">⏳</div>
+          <h2>Waiting for Teacher</h2>
+          <p className="exam-info">{examTitle} - {className}</p>
+        </div>
+
+        <div className="waiting-status">
+          {checkingStatus ? (
+            <div className="checking-status">
+              <div className="loading-spinner"></div>
+              <p>Checking exam status...</p>
+            </div>
+          ) : status ? (
+            <div className="status-info">
+              {status.canEnter ? (
+                <div className="status-ready">
+                  <div className="ready-icon">✅</div>
+                  <h3>Exam is Ready!</h3>
+                  <p>Teacher has started the exam. You can now enter.</p>
+                  <button className="enter-btn" onClick={() => {
+                    window.location.reload(); // Reload to trigger exam entry
+                  }}>
+                    🚪 Enter Exam
+                  </button>
+                </div>
+              ) : (
+                <div className="status-waiting">
+                  <div className="waiting-icon">⏳</div>
+                  <h3>Waiting for Teacher</h3>
+                  <p>Please wait for the teacher to start the exam session.</p>
+                  <p className="status-message">{status.message}</p>
+                  
+                  <div className="waiting-indicators">
+                    <div className="indicator active"></div>
+                    <div className="indicator"></div>
+                    <div className="indicator"></div>
+                    <div className="indicator"></div>
+                    <div className="indicator"></div>
+                  </div>
+                  
+                  <p className="last-checked">
+                    Last checked: {Math.floor((Date.now() - lastChecked) / 1000)} seconds ago
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="status-error">
+              <div className="error-icon">❌</div>
+              <h3>Unable to Check Status</h3>
+              <p>Please check your connection and try again.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="waiting-rules">
+          <h4>Please prepare:</h4>
+          <ul>
+            <li>✅ Ensure good lighting</li>
+            <li>✅ Position camera at eye level</li>
+            <li>✅ Clear your workspace</li>
+            <li>✅ Have your ID ready if required</li>
+            <li>✅ Close all other applications</li>
+          </ul>
+        </div>
+
+        <div className="waiting-actions">
+          <button className="refresh-btn" onClick={checkExamStatus} disabled={checkingStatus}>
+            🔄 Refresh Status
+          </button>
+          <button className="cancel-btn" onClick={onCancel}>
+            ← Leave Waiting Room
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -868,7 +987,7 @@ const ChatComponent = React.memo(({
   );
 });
 
-// ==================== MAIN STUDENT QUIZ COMPONENT - FIXED VERSION ====================
+// ==================== MAIN STUDENT QUIZ COMPONENT - WITH TIMER ====================
 export default function StudentQuizPage() {
   const { examId } = useParams();
   const navigate = useNavigate();
@@ -892,12 +1011,11 @@ export default function StudentQuizPage() {
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [windowBlurCount, setWindowBlurCount] = useState(0);
   const [lastTabSwitchTime, setLastTabSwitchTime] = useState(0);
+  
+  // Show waiting room state
+  const [showWaitingRoom, setShowWaitingRoom] = useState(false);
 
-  // ✅ TIMER STATE
-  const [timeLeft, setTimeLeft] = useState(null);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
-
-  // ✅ DETECTION SETTINGS
+  // DETECTION SETTINGS
   const [teacherDetectionSettings, setTeacherDetectionSettings] = useState({
     faceDetection: true,
     gazeDetection: true,
@@ -918,7 +1036,7 @@ export default function StudentQuizPage() {
     history: []
   });
 
-  // ✅ CAMERA & MICROPHONE STATE
+  // CAMERA & MICROPHONE STATE
   const [micState, setMicState] = useState({
     isConnected: false,
     isInitializing: false,
@@ -939,6 +1057,13 @@ export default function StudentQuizPage() {
   const [teacherSocketId, setTeacherSocketId] = useState(null);
   const [showAlertsPanel, setShowAlertsPanel] = useState(false);
 
+  // ✅ TIMER STATE - ADDED THIS
+  const [examTimer, setExamTimer] = useState({
+    hasTimer: false,
+    remaining: 0,
+    isRunning: false
+  });
+
   // Chat State
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -951,42 +1076,6 @@ export default function StudentQuizPage() {
   const proctoringIntervalRef = useRef(null);
 
   const [examType, setExamType] = useState('asynchronous');
-
-  // ==================== TIMER FUNCTIONS ====================
-  const saveTimerToLocalStorage = (time, isRunning) => {
-    const now = Date.now();
-    const lastSave = localStorage.getItem(`last-save-${examId}`);
-    
-    if (lastSave && now - parseInt(lastSave) < 5000) {
-      return;
-    }
-    
-    const timerData = {
-      examId: examId,
-      timeLeft: time,
-      isTimerRunning: isRunning,
-      lastUpdated: new Date().toISOString()
-    };
-    
-    localStorage.setItem(`timer-${examId}`, JSON.stringify(timerData));
-    localStorage.setItem(`last-save-${examId}`, now.toString());
-  };
-
-  const loadTimerFromLocalStorage = () => {
-    try {
-      const savedTimer = localStorage.getItem(`timer-${examId}`);
-      if (savedTimer) {
-        return JSON.parse(savedTimer);
-      }
-    } catch (error) {
-      console.error('Error loading timer:', error);
-    }
-    return null;
-  };
-
-  const clearTimerFromLocalStorage = () => {
-    localStorage.removeItem(`timer-${examId}`);
-  };
 
   // ==================== QUIZ MANAGEMENT ====================
   const loadQuiz = useCallback(async () => {
@@ -1002,23 +1091,6 @@ export default function StudentQuizPage() {
         // Set exam type
         const examTypeFromData = quizData.examType || 'asynchronous';
         setExamType(examTypeFromData);
-        
-        // Set timer based on exam type
-        if (examTypeFromData === 'asynchronous') {
-          if (quizData.timerSettings?.totalSeconds) {
-            setTimeLeft(quizData.timerSettings.totalSeconds);
-            setIsTimerRunning(true);
-          } else if (quizData.timeLimit) {
-            setTimeLeft(quizData.timeLimit * 60);
-            setIsTimerRunning(true);
-          } else {
-            setTimeLeft(60 * 60);
-            setIsTimerRunning(true);
-          }
-        } else if (examTypeFromData === 'live-class') {
-          setTimeLeft(0);
-          setIsTimerRunning(false);
-        }
         
         // Load answers
         const initialAnswers = {};
@@ -1043,6 +1115,56 @@ export default function StudentQuizPage() {
       setLoading(false);
     }
   }, [examId]);
+
+  // ✅ ADDED: Timer check on mount
+  useEffect(() => {
+    if (socketRef.current && examId && permissionsGranted) {
+      socketRef.current.emit('get-timer-status', { examId });
+    }
+  }, [examId, permissionsGranted]);
+
+  // ==================== UPDATED: INITIAL EXAM ENTRY CHECK ====================
+  useEffect(() => {
+    const checkIfCanEnter = async () => {
+      try {
+        // First check if exam has started
+        const statusResponse = await api.get(`/exams/${examId}/can-enter`);
+        
+        if (statusResponse.success) {
+          const { canEnter, isActive, isStarted, examTitle, className } = statusResponse.data;
+          
+          if (canEnter && isActive && isStarted) {
+            // Exam is started, proceed with permissions check
+            if (requiresMicrophone) {
+              navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                  stream.getTracks().forEach(track => track.stop());
+                  setExamStarted(true);
+                  setPermissionsGranted(true);
+                  loadQuiz();
+                })
+                .catch(error => {
+                  alert('🎤 Microphone access is REQUIRED.');
+                });
+            } else {
+              setExamStarted(true);
+              setPermissionsGranted(true);
+              loadQuiz();
+            }
+          } else {
+            // Show waiting room
+            setShowWaitingRoom(true);
+          }
+        }
+      } catch (error) {
+        console.error('Error checking exam status:', error);
+      }
+    };
+    
+    if (examId) {
+      checkIfCanEnter();
+    }
+  }, [examId, requiresMicrophone, loadQuiz]);
 
   const handleAnswerChange = useCallback((questionIndex, value) => {
     setAnswers(prev => {
@@ -1085,10 +1207,9 @@ export default function StudentQuizPage() {
       
       if (submissionResponse.success) {
         console.log('✅ Quiz answers submitted successfully');
-        clearTimerFromLocalStorage();
 
         if (isAutoSubmit) {
-          alert('⏰ Time is up! Your answers have been automatically submitted.');
+          alert('Your answers have been submitted.');
         } else {
           alert('✅ Answers submitted successfully! Your exam has been moved to "Done" section.');
         }
@@ -1111,7 +1232,7 @@ export default function StudentQuizPage() {
             state: { 
               examCompleted: true,
               examId: examId,
-              message: isAutoSubmit ? 'Time expired - Quiz auto-submitted' : 'Quiz completed successfully!'
+              message: isAutoSubmit ? 'Quiz submitted' : 'Quiz completed successfully!'
             }
           });
         }, 2000);
@@ -1286,27 +1407,6 @@ export default function StudentQuizPage() {
           setExamStarted(true);
           setPermissionsGranted(true);
           
-          if (examType === 'asynchronous') {
-            console.log('⏰ Async exam - Starting local timer');
-            
-            if (quiz?.timerSettings?.totalSeconds) {
-              setTimeLeft(quiz.timerSettings.totalSeconds);
-              setIsTimerRunning(true);
-            } else if (quiz?.timeLimit) {
-              setTimeLeft(quiz.timeLimit * 60);
-              setIsTimerRunning(true);
-            }
-            
-            saveTimerToLocalStorage(timeLeft, true);
-          } else {
-            const savedTimer = loadTimerFromLocalStorage();
-            if (savedTimer && savedTimer.examId === examId) {
-              console.log('⏰ Resuming from saved timer:', savedTimer);
-              setTimeLeft(savedTimer.timeLeft);
-              setIsTimerRunning(savedTimer.isTimerRunning);
-            }
-          }
-          
           loadQuiz();
         })
         .catch(error => {
@@ -1317,30 +1417,9 @@ export default function StudentQuizPage() {
       setExamStarted(true);
       setPermissionsGranted(true);
       
-      if (examType === 'asynchronous') {
-        console.log('⏰ Async exam - Starting local timer (no mic)');
-        
-        if (quiz?.timerSettings?.totalSeconds) {
-          setTimeLeft(quiz.timerSettings.totalSeconds);
-          setIsTimerRunning(true);
-        } else if (quiz?.timeLimit) {
-          setTimeLeft(quiz.timeLimit * 60);
-          setIsTimerRunning(true);
-        }
-        
-        saveTimerToLocalStorage(timeLeft, true);
-      } else {
-        const savedTimer = loadTimerFromLocalStorage();
-        if (savedTimer && savedTimer.examId === examId) {
-          console.log('⏰ Resuming from saved timer:', savedTimer);
-          setTimeLeft(savedTimer.timeLeft);
-          setIsTimerRunning(savedTimer.isTimerRunning);
-        }
-      }
-      
       loadQuiz();
     }
-  }, [requiresMicrophone, loadQuiz, examId, examType, quiz]);
+  }, [requiresMicrophone, loadQuiz]);
 
   // ==================== SOCKET.IO SETUP ====================
   useEffect(() => {
@@ -1378,23 +1457,47 @@ export default function StudentQuizPage() {
         userId: 'student-user',
         userRole: 'student'
       });
-      
-      if (examType === 'asynchronous' && timeLeft > 0) {
-        console.log('⏰ Async exam detected - auto-starting local timer');
-        setIsTimerRunning(true);
-        saveTimerToLocalStorage(timeLeft, true);
-      }
 
-      // Request time from teacher
-      const requestTime = () => {
-        if (newSocket.connected) {
-          console.log('🕒 Requesting current time from teacher...');
-          newSocket.emit('student-time-request', {
-            studentSocketId: newSocket.id,
-            roomId: `exam-${examId}`
-          });
+      // ✅ ADDED: TIMER HANDLERS
+      newSocket.on('timer-started', (data) => {
+        console.log('⏱️ Timer started:', data);
+        setExamTimer({
+          hasTimer: true,
+          remaining: data.duration,
+          isRunning: true
+        });
+      });
+
+      newSocket.on('timer-update', (data) => {
+        setExamTimer(prev => ({
+          ...prev,
+          remaining: data.remaining
+        }));
+        
+        // Alert when 5 minutes left
+        if (data.remaining === 300) {
+          alert('⚠️ 5 minutes remaining!');
         }
-      };
+        
+        // Alert when 1 minute left
+        if (data.remaining === 60) {
+          alert('⚠️ 1 minute remaining!');
+        }
+      });
+
+      newSocket.on('timer-ended', (data) => {
+        console.log('⏰ Timer ended:', data);
+        setExamTimer({
+          hasTimer: false,
+          remaining: 0,
+          isRunning: false
+        });
+        
+        alert('⏰ Time is up! Your exam will be submitted automatically.');
+        
+        // Auto-submit when timer ends
+        handleSubmitQuiz(true);
+      });
 
       // Disconnection handler
       newSocket.on('force-exit-exam', (data) => {
@@ -1404,7 +1507,7 @@ export default function StudentQuizPage() {
         let alertType = 'warning';
         
         if (data.reason === 'time_up') {
-          message = '⏰ Exam time has expired. You have been disconnected.';
+          message = 'Exam time has expired. You have been disconnected.';
           alertType = 'info';
         } else if (data.reason === 'excessive_violations') {
           message = '🚫 You have been disconnected due to excessive proctoring violations.';
@@ -1437,8 +1540,6 @@ export default function StudentQuizPage() {
           proctoringIntervalRef.current = null;
         }
         
-        clearTimerFromLocalStorage();
-        
         if (data.submitAnswers && Object.keys(answers).length > 0) {
           console.log('📤 Auto-submitting answers before disconnection');
           handleSubmitQuiz(true).catch(err => {
@@ -1461,48 +1562,6 @@ export default function StudentQuizPage() {
             } 
           });
         }, 2000);
-      });
-
-      newSocket.on('force-timer-sync', (data) => {
-        console.log('🔄 Received forced timer sync:', data);
-        
-        if (data.forceUpdate) {
-          clearTimerFromLocalStorage();
-          setTimeLeft(data.timeLeft);
-          setIsTimerRunning(data.isTimerRunning);
-          saveTimerToLocalStorage(data.timeLeft, data.isTimerRunning);
-        }
-      });
-
-      newSocket.on('clear-timer-cache', (data) => {
-        if (data.examId === examId) {
-          clearTimerFromLocalStorage();
-          console.log('🧹 Timer cache cleared by teacher');
-        }
-      });
-
-      newSocket.on('send-current-time', (data) => {
-        console.log('🕒 Received time from teacher:', {
-          timeLeft: data.timeLeft,
-          isTimerRunning: data.isTimerRunning,
-          examStarted: data.examStarted
-        });
-        
-        let receivedTime = data.timeLeft;
-        
-        if (receivedTime < 100 && receivedTime > 0) {
-          console.log('🔄 Converting minutes to seconds:', receivedTime, 'minutes');
-          receivedTime = receivedTime * 60;
-        }
-        
-        setTimeLeft(receivedTime);
-        setIsTimerRunning(data.isTimerRunning);
-        saveTimerToLocalStorage(receivedTime, data.isTimerRunning);
-        
-        if (data.examStarted && !examStarted) {
-          setExamStarted(true);
-          setPermissionsGranted(true);
-        }
       });
 
       newSocket.on('proctoring-violation', (data) => {
@@ -1589,18 +1648,6 @@ export default function StudentQuizPage() {
           return updated;
         });
       });
-
-      // Request current time
-      setTimeout(() => {
-        if (newSocket.connected) {
-          console.log('🕒 Requesting persistent timer from server...');
-          newSocket.emit('student-time-request', {
-            studentSocketId: newSocket.id,
-            roomId: `exam-${examId}`,
-            examId: examId
-          });
-        }
-      }, 1000);
     });
 
     newSocket.on('detection-settings-update', (data) => {
@@ -1628,18 +1675,6 @@ export default function StudentQuizPage() {
       setPermissionsGranted(true);
       if (requiresCamera) setCameraActive(true);
       if (requiresMicrophone) setMicrophoneActive(true);
-      
-      setIsTimerRunning(true);
-      
-      setTimeout(() => {
-        if (socketRef.current && socketRef.current.connected) {
-          socketRef.current.emit('student-time-request', {
-            studentSocketId: socketRef.current.id,
-            roomId: `exam-${examId}`
-          });
-          console.log('🕒 Requested timer from teacher after exam start');
-        }
-      }, 1000);
       
       loadQuiz();
     });
@@ -1678,35 +1713,6 @@ export default function StudentQuizPage() {
       setTimeout(() => {
         navigate('/dashboard');
       }, 3000);
-    });
-
-    newSocket.on('exam-time-update', (data) => {
-      const isLiveClass = examType === 'live-class' || quiz?.isLiveClass;
-
-      if (!isLiveClass && examType === 'asynchronous') {
-        console.log('🛑 Ignoring teacher timer update for async exam');
-        return;
-      }
-
-      console.log('🎥 Live class - Accepting teacher timer update');
-      
-      console.log('🕒 Received timer update from teacher:', {
-        timeLeft: data.timeLeft,
-        isTimerRunning: data.isTimerRunning,
-        teacher: data.teacherName,
-        timestamp: data.timestamp
-      });
-      
-      let receivedTime = data.timeLeft;
-      
-      if (receivedTime < 100 && receivedTime > 0) {
-        console.log('🔄 Converting minutes to seconds:', receivedTime, 'minutes');
-        receivedTime = receivedTime * 60;
-      }
-      
-      saveTimerToLocalStorage(receivedTime, data.isTimerRunning);
-      setTimeLeft(receivedTime);
-      setIsTimerRunning(data.isTimerRunning);
     });
 
     newSocket.on('camera-request', handleCameraRequest);
@@ -1749,8 +1755,56 @@ export default function StudentQuizPage() {
       setProctoringAlerts(prev => [newAlert, ...prev.slice(0, 19)]);
     });
     
-    newSocket.on('chat-message', handleChatMessage);
-    
+    // ✅ FIXED: Updated chat message handler with duplicate prevention
+    newSocket.on('exam-chat-message', (data) => {
+      console.log('💬 Student received chat message:', data);
+      
+      if (!data.message) {
+        console.error('❌ Invalid chat message format:', data);
+        return;
+      }
+
+      const newMessageData = {
+        id: data.message.id || Date.now().toString(),
+        text: data.message.text,
+        sender: data.message.sender,
+        senderName: data.message.senderName || (data.message.sender === 'teacher' ? 'Teacher' : 'Student'),
+        timestamp: new Date(data.message.timestamp || Date.now()),
+        type: data.message.type || 'chat'
+      };
+      
+      console.log('💾 Adding message to student state:', newMessageData);
+      
+      // ✅ FIXED: Prevent duplicates by checking if message already exists
+      setMessages(prev => {
+        // Check for duplicate by ID or by text and sender within last 2 seconds
+        const isDuplicate = prev.some(msg => {
+          if (msg.id === newMessageData.id) return true;
+          
+          // If same text from same sender within 2 seconds, consider it duplicate
+          const timeDiff = Math.abs(msg.timestamp.getTime() - newMessageData.timestamp.getTime());
+          return (
+            msg.text === newMessageData.text &&
+            msg.sender === newMessageData.sender &&
+            timeDiff < 2000
+          );
+        });
+        
+        if (isDuplicate) {
+          console.log('🛑 Skipping duplicate message');
+          return prev;
+        }
+        
+        const updatedMessages = [...prev, newMessageData];
+        console.log('📝 Student messages count:', updatedMessages.length);
+        return updatedMessages;
+      });
+      
+      if (!showChat) {
+        setUnreadCount(prev => prev + 1);
+      }
+    });
+
     newSocket.on('attempts-update', (data) => {
       console.log('📊 Received attempts update:', data);
       
@@ -2090,37 +2144,8 @@ export default function StudentQuizPage() {
     }
   }, [requiresCamera]);
 
-  // ==================== CHAT FUNCTIONS ====================
-  const handleChatMessage = useCallback((data) => {
-    console.log('💬 Student received chat message:', data);
-    
-    if (!data.message) {
-      console.error('❌ Invalid chat message format:', data);
-      return;
-    }
-
-    const newMessage = {
-      id: data.message.id || Date.now().toString(),
-      text: data.message.text,
-      sender: data.message.sender,
-      senderName: data.message.senderName || 'Teacher',
-      timestamp: new Date(data.message.timestamp || Date.now()),
-      type: data.message.type || 'teacher'
-    };
-    
-    console.log('💾 Adding message to student state:', newMessage);
-    
-    setMessages(prev => {
-      const updatedMessages = [...prev, newMessage];
-      console.log('📝 Student messages count:', updatedMessages.length);
-      return updatedMessages;
-    });
-    
-    if (!showChat) {
-      setUnreadCount(prev => prev + 1);
-    }
-  }, [showChat]);
-
+  // ==================== UPDATED CHAT FUNCTIONS ====================
+  // ✅ FIXED: handleSendMessage function - DO NOT add message to local state here
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !socketRef.current) return;
@@ -2130,18 +2155,22 @@ export default function StudentQuizPage() {
       text: newMessage.trim(),
       sender: 'student',
       senderName: 'Student',
-      timestamp: new Date(),
-      type: 'student'
+      timestamp: new Date().toISOString(),
+      type: 'chat'
     };
 
-    socketRef.current.emit('send-chat-message', {
+    // ✅ FIXED: Only send via socket, NOT add to local state
+    socketRef.current.emit('send-exam-chat-message', {
       roomId: `exam-${examId}`,
       message: messageData
     });
 
+    // ❌ REMOVED: Do NOT add to local state here
+    // The message will be received back from socket and added there
+
     setNewMessage('');
 
-    console.log('📤 Student sent message:', messageData);
+    console.log('📤 Student sent message via socket:', messageData);
   };
 
   const toggleChat = () => {
@@ -2153,102 +2182,8 @@ export default function StudentQuizPage() {
     });
   };
 
-  // ==================== TIMER EFFECTS ====================
-  useEffect(() => {
-    if (timeLeft === null || !isTimerRunning) {
-      console.log('⏰ Student timer stopped:', { 
-        timeLeft, 
-        isTimerRunning,
-        examStarted,
-        examType
-      });
-      return;
-    }
-
-    console.log('⏰ Student timer STARTED:', {
-      initialTime: timeLeft,
-      formatted: formatTime(timeLeft),
-      examStarted,
-      permissionsGranted,
-      examType: examType
-    });
-
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          console.log('⏰ Student time expired! Auto-submitting...');
-          clearTimerFromLocalStorage();
-          handleSubmitQuiz(true);
-          return 0;
-        }
-        
-        const newTime = prev - 1;
-        
-        if (newTime % 10 === 0) {
-          saveTimerToLocalStorage(newTime, isTimerRunning);
-        }
-        
-        return newTime;
-      });
-    }, 1000);
-
-    return () => {
-      clearInterval(timer);
-      console.log('⏰ Student timer cleaned up');
-    };
-  }, [timeLeft, isTimerRunning, handleSubmitQuiz, examStarted, examType]);
-
-  useEffect(() => {
-    if (timeLeft !== null) {
-      saveTimerToLocalStorage(timeLeft, isTimerRunning);
-    }
-  }, [isTimerRunning, timeLeft]);
-
-  useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      if (timeLeft !== null) {
-        saveTimerToLocalStorage(timeLeft, isTimerRunning);
-        console.log('💾 Timer saved before page unload');
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [timeLeft, isTimerRunning]);
-
-  useEffect(() => {
-    if (socketRef.current && socketRef.current.connected && examStarted) {
-      const interval = setInterval(() => {
-        if (socketRef.current && socketRef.current.connected) {
-          socketRef.current.emit('student-time-request', {
-            studentSocketId: socketRef.current.id,
-            roomId: `exam-${examId}`,
-            examId: examId
-          });
-        }
-      }, 30000);
-      
-      return () => clearInterval(interval);
-    }
-  }, [examStarted, examId]);
-
-  useEffect(() => {
-    if (timeLeft !== null && timeLeft > 0 && examStarted) {
-      if (!isTimerRunning) {
-        console.log(' Auto-starting student timer:', formatTime(timeLeft));
-        setIsTimerRunning(true);
-      }
-    }
-  }, [timeLeft, examStarted, isTimerRunning]);
-
-  // ==================== UTILITY FUNCTIONS ====================
+  // ✅ ADDED: formatTime function
   const formatTime = (seconds) => {
-    if (seconds === null || seconds === undefined) return '00:00';
-    
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
@@ -2260,15 +2195,19 @@ export default function StudentQuizPage() {
     }
   };
 
-  // ==================== INITIALIZATION ====================
-  useEffect(() => {
-    if (examId) {
-      loadQuiz();
-    }
-  }, [examId, loadQuiz]);
-
   // ==================== RENDER FUNCTIONS ====================
   const progressPercentage = (answeredCount / (quiz?.questions?.length || 1)) * 100;
+
+  // ✅ ADDED: Show exam waiting room if teacher hasn't started the exam
+  if (showWaitingRoom) {
+    return (
+      <ExamWaitingRoom 
+        examTitle={examTitle}
+        className={className}
+        onCancel={() => navigate('/dashboard')}
+      />
+    );
+  }
 
   // Show permission check first
   if (!examStarted) {
@@ -2415,37 +2354,20 @@ export default function StudentQuizPage() {
             )}
           </div>
 
-          {/* Timer Display */}
-          <div className="timer-section-student">
-            <div className={`timer-display-student ${isTimerRunning ? 'running' : 'paused'}`}>
-              {timeLeft !== null ? (
-                <>
-                  <span className="timer-icon">
-                    {isTimerRunning ? '' : '⏸️'}
-                  </span>
-                  <span className="timer-text">
-                    {formatTime(timeLeft)}
-                  </span>
-                  <span className="timer-status">
-                    {isTimerRunning ? 'Running' : 'Paused'}
-                  </span>
-                  
-                  {/* Show time warnings */}
-                  {timeLeft < 300 && timeLeft > 60 && (
-                    <span className="time-warning-badge">⚠️ 5 min</span>
-                  )}
-                  {timeLeft <= 60 && timeLeft > 0 && (
-                    <span className="time-critical-badge">🚨 1 min</span>
-                  )}
-                </>
-              ) : (
-                <span className="timer-loading">
-                  <div className="loading-spinner-tiny"></div>
-                  Syncing timer...
+          {/* ✅ ADDED: Timer display */}
+          {examTimer.hasTimer && examTimer.isRunning && (
+            <div className="student-timer-display">
+              <span className="timer-icon">⏱️</span>
+              <span className="timer-text">
+                {formatTime(examTimer.remaining)}
+              </span>
+              {examTimer.remaining <= 300 && (
+                <span className="timer-warning">
+                  {examTimer.remaining <= 60 ? '⚠️ Less than 1 min!' : '⚠️ Time running out!'}
                 </span>
               )}
             </div>
-          </div>
+          )}
 
           {(requiresCamera || requiresMicrophone) && (
             <div className="monitoring-status-header">
@@ -2509,25 +2431,12 @@ export default function StudentQuizPage() {
         onToggle={() => setShowAlertsPanel(!showAlertsPanel)}
       />
 
-      {/* Timer Display */}
+      {/* Progress Display */}
       <div className="quiz-progress">
         <div className="progress-info">
           <span className="progress-text">
             Answered: {answeredCount} / {quiz.questions?.length || 0}
           </span>
-          
-          {timeLeft !== null ? (
-            <span className="time-remaining">
-              <span className="time-icon"></span>
-              {formatTime(timeLeft)}
-              {!isTimerRunning && <span className="timer-paused"> (Paused)</span>}
-            </span>
-          ) : (
-            <span className="time-syncing">
-              <div className="loading-spinner-small"></div>
-              Syncing timer with teacher...
-            </span>
-          )}
         </div>
         
         <div className="progress-bar">
@@ -2535,16 +2444,6 @@ export default function StudentQuizPage() {
             className="progress-fill"
             style={{ width: `${progressPercentage}%` }}
           ></div>
-          
-          {/* Time warning indicator */}
-          {timeLeft !== null && timeLeft < 300 && timeLeft > 0 && (
-            <div 
-              className="time-warning-indicator"
-              style={{ left: `${(1 - (timeLeft / (quiz.timeLimit * 60))) * 100}%` }}
-            >
-              ⚠️
-            </div>
-          )}
         </div>
       </div>
 
@@ -2649,11 +2548,6 @@ export default function StudentQuizPage() {
             <span className="answered-count">
               {answeredCount} of {quiz.questions?.length || 0} questions answered
             </span>
-            {timeLeft !== null && timeLeft < 300 && (
-              <span className="time-warning">
-                ⚠️ {formatTime(timeLeft)} remaining
-              </span>
-            )}
           </div>
           <button 
             className={`submit-quiz-btn ${answeredCount === 0 ? 'disabled' : ''}`}

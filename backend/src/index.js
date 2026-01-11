@@ -152,6 +152,107 @@ const broadcastDeletedComment = (quizId, commentId) => {
   io.to(`quiz-comments-${quizId}`).emit('comment-deleted', commentId);
 };
 
+// ===== REAL-TIME TIMER UPDATE FUNCTIONS =====
+// ✅ ADDED: Socket.IO handler for server time requests
+const requestServerTime = async (data) => {
+  const { examId, studentId } = data;
+  
+  const timerService = require('./services/examTimerService');
+  const timeData = await timerService.getExamStatus(examId, studentId);
+  
+  return {
+    examId,
+    timeData,
+    serverTime: new Date().toISOString()
+  };
+};
+
+// ✅ ADDED: Broadcast timer updates to all students
+const broadcastTimerUpdate = (examId, updateData) => {
+  io.to(`exam-${examId}`).emit('server-timer-update', {
+    examId,
+    ...updateData,
+    timestamp: new Date().toISOString()
+  });
+};
+
+// ===== TIMER MANAGEMENT FUNCTIONS =====
+const activeTimers = new Map();
+
+function startTimerCountdown(examId, duration) {
+  const roomId = `exam-${examId}`;
+  
+  // Clear existing timer if any
+  if (activeTimers.has(examId)) {
+    clearInterval(activeTimers.get(examId));
+  }
+  
+  let remaining = duration;
+  
+  const timerInterval = setInterval(async () => {
+    remaining--;
+    
+    // Broadcast remaining time to all in room
+    io.to(roomId).emit('timer-update', {
+      examId,
+      remaining,
+      formatted: formatTime(remaining)
+    });
+    
+    // Check if timer reached 0
+    if (remaining <= 0) {
+      clearInterval(timerInterval);
+      activeTimers.delete(examId);
+      
+      // Auto-disconnect all students if enabled
+      const Exam = require('./models/Exam');
+      const exam = await Exam.findById(examId);
+      
+      if (exam?.liveClassSettings?.autoDisconnect) {
+        console.log(`⏰ Timer ended for exam ${examId}, disconnecting students...`);
+        
+        // Broadcast timer ended event
+        io.to(roomId).emit('timer-ended', {
+          examId,
+          message: 'Time is up! Exam session has ended.',
+          forcedExit: true
+        });
+        
+        // Force disconnect all students
+        if (examRooms.has(roomId)) {
+          const room = examRooms.get(roomId);
+          room.students.forEach((studentInfo, studentSocketId) => {
+            const studentSocket = io.sockets.sockets.get(studentSocketId);
+            if (studentSocket) {
+              studentSocket.emit('force-exit-exam', {
+                reason: 'time_up',
+                examId: examId,
+                message: 'Exam time has expired',
+                submitAnswers: true
+              });
+            }
+          });
+        }
+      }
+    }
+  }, 1000);
+  
+  activeTimers.set(examId, timerInterval);
+}
+
+// ADD THIS HELPER FUNCTION:
+function formatTime(seconds) {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  
+  if (hrs > 0) {
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  } else {
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+}
+
 // ===== SOCKET.IO AUTHENTICATION =====
 io.use((socket, next) => {
   try {
@@ -300,6 +401,114 @@ io.on("connection", (socket) => {
     console.log(`📢 User ${socket.userName} left class notifications: ${roomName}`);
   });
 
+  // ✅ ADDED: REQUEST SERVER TIME HANDLER
+  socket.on('request-server-time', async (data) => {
+    try {
+      console.log('🕒 Requesting server time for:', data);
+      const { examId, studentId } = data;
+      
+      const timerService = require('./services/examTimerService');
+      const timeData = await timerService.getExamStatus(examId, studentId);
+      
+      socket.emit('server-time-response', {
+        examId,
+        timeData,
+        serverTime: new Date().toISOString()
+      });
+      
+      console.log('✅ Server time response sent for exam:', examId);
+    } catch (error) {
+      console.error('❌ Error in request-server-time:', error);
+      socket.emit('server-time-error', {
+        error: 'Failed to get server time',
+        examId: data.examId
+      });
+    }
+  });
+
+  // ✅ ADDED: BROADCAST TIMER UPDATE HANDLER
+  socket.on('broadcast-timer-update', (data) => {
+    try {
+      console.log('📢 Broadcasting timer update:', data);
+      const { examId, ...updateData } = data;
+      
+      broadcastTimerUpdate(examId, updateData);
+      
+      console.log(`✅ Timer update broadcasted to exam-${examId}`);
+    } catch (error) {
+      console.error('❌ Error broadcasting timer update:', error);
+    }
+  });
+
+  // ✅ ADDED: TIMER MANAGEMENT HANDLERS
+  socket.on('start-exam-timer', async (data) => {
+    try {
+      const { examId, duration } = data; // duration in seconds
+      console.log('⏱️ Starting exam timer:', examId, duration);
+      
+      const Exam = require('./models/Exam');
+      const exam = await Exam.findById(examId);
+      
+      if (!exam) {
+        socket.emit('timer-error', { message: 'Exam not found' });
+        return;
+      }
+      
+      // Update exam with timer
+      const durationMinutes = Math.floor(duration / 60);
+      await exam.startTimer(durationMinutes);
+      
+      const roomId = `exam-${examId}`;
+      
+      // Broadcast to all connected clients
+      io.to(roomId).emit('timer-started', {
+        examId,
+        startedAt: exam.liveClassSettings.timerStartedAt,
+        endsAt: exam.liveClassSettings.timerEndsAt,
+        duration,
+        roomId
+      });
+      
+      console.log(`✅ Timer started for exam ${examId}, broadcasting to room ${roomId}`);
+      
+      // Start countdown interval
+      startTimerCountdown(examId, duration);
+      
+    } catch (error) {
+      console.error('❌ Error starting timer:', error);
+      socket.emit('timer-error', { message: 'Failed to start timer' });
+    }
+  });
+
+  socket.on('get-timer-status', async (data) => {
+    try {
+      const { examId } = data;
+      const Exam = require('./models/Exam');
+      const exam = await Exam.findById(examId);
+      
+      if (!exam || !exam.liveClassSettings?.hasTimer) {
+        socket.emit('timer-status', { 
+          hasTimer: false,
+          remaining: 0
+        });
+        return;
+      }
+      
+      const remaining = exam.getRemainingTime();
+      
+      socket.emit('timer-status', {
+        hasTimer: true,
+        remaining,
+        startedAt: exam.liveClassSettings.timerStartedAt,
+        endsAt: exam.liveClassSettings.timerEndsAt,
+        autoDisconnect: exam.liveClassSettings.autoDisconnect
+      });
+      
+    } catch (error) {
+      console.error('❌ Error getting timer status:', error);
+    }
+  });
+
   // ✅ ADDED: Broadcast when teacher publishes/deploys an exam
   socket.on('exam-published', async (data) => {
     console.log('📢 Teacher published/deployed exam:', data);
@@ -414,13 +623,22 @@ io.on("connection", (socket) => {
     console.log(`📝 User ${socket.userName} joined quiz comments room: ${roomName}`);
   });
 
-  // ✅ ADD THIS NEW HANDLER FOR EXAM CHAT (after the class chat handlers)
-  socket.on("send-exam-chat-message", async (data) => {
+  // ✅ UPDATED: Unified chat handler for both teacher and student
+  socket.on('send-exam-chat-message', async (data) => {
     try {
-      console.log('💬 Received exam chat message:', data);
+      console.log('💬 Received chat message:', {
+        from: socket.userName,
+        role: socket.userRole,
+        data: data
+      });
       
       const { roomId, message } = data;
       
+      if (!roomId || !message) {
+        console.error('❌ Invalid chat data:', data);
+        return;
+      }
+
       // ✅ SAFELY EXTRACT MESSAGE TEXT
       let messageText;
       if (typeof message === 'object' && message.text) {
@@ -428,7 +646,7 @@ io.on("connection", (socket) => {
       } else if (typeof message === 'string') {
         messageText = message;
       } else {
-        console.error('❌ Invalid message format in exam chat:', message);
+        console.error('❌ Invalid message format:', message);
         return;
       }
       
@@ -437,25 +655,30 @@ io.on("connection", (socket) => {
       }
 
       const messageData = {
-        id: message.id || Date.now().toString(),
+        id: Date.now().toString(),
         text: messageText.trim(),
-        sender: message.sender || socket.userRole,
-        senderName: message.senderName || socket.userName,
-        timestamp: message.timestamp || new Date(),
-        type: message.type || socket.userRole
+        sender: socket.userRole, // 'teacher' or 'student'
+        senderName: socket.userName,
+        timestamp: new Date().toISOString(),
+        type: 'chat'
       };
 
-      // ✅ BROADCAST TO EXAM ROOM
-      io.to(roomId).emit("chat-message", {
-        message: messageData,
-        userName: socket.userName,
-        userRole: socket.userRole
+      console.log(`💬 Broadcasting chat to ${roomId}:`, {
+        from: socket.userName,
+        message: messageText,
+        toRoom: roomId
       });
 
-      console.log(`💬 Exam chat broadcast to ${roomId}:`, messageData);
+      // ✅ BROADCAST TO EXAM ROOM - USING SAME EVENT NAME
+      io.to(roomId).emit('exam-chat-message', {
+        message: messageData,
+        userName: socket.userName,
+        userRole: socket.userRole,
+        timestamp: new Date().toISOString()
+      });
 
     } catch (error) {
-      console.error('❌ Error in exam chat:', error);
+      console.error('❌ Error handling chat message:', error);
     }
   });
 
@@ -664,6 +887,14 @@ io.on("connection", (socket) => {
           teacherName: 'System'
         });
         
+        // ✅ ALSO BROADCAST SERVER TIMER UPDATE
+        broadcastTimerUpdate(roomId.replace('exam-', ''), {
+          timeLeft: remaining,
+          isTimerRunning: true,
+          roomId: roomId,
+          action: 'auto-update'
+        });
+        
         // Auto-end if time is up
         if (remaining <= 0) {
           console.log(`⏰ Time expired for room ${roomId}`);
@@ -699,6 +930,14 @@ io.on("connection", (socket) => {
       timestamp: Date.now(),
       teacherName: 'Teacher'
     });
+    
+    // ✅ ALSO BROADCAST SERVER TIMER UPDATE
+    broadcastTimerUpdate(data.examId, {
+      timeLeft: data.totalSeconds,
+      isTimerRunning: true,
+      roomId: data.roomId,
+      action: 'started'
+    });
   });
 
   socket.on('pause-exam-timer', async (data) => {
@@ -714,6 +953,14 @@ io.on("connection", (socket) => {
         isTimerRunning: false,
         timestamp: Date.now(),
         teacherName: 'Teacher'
+      });
+      
+      // ✅ ALSO BROADCAST SERVER TIMER UPDATE
+      broadcastTimerUpdate(data.examId, {
+        timeLeft: room.timeLeft,
+        isTimerRunning: false,
+        roomId: data.roomId,
+        action: 'paused'
       });
     }
   });
@@ -731,6 +978,14 @@ io.on("connection", (socket) => {
         isTimerRunning: true,
         timestamp: Date.now(),
         teacherName: 'Teacher'
+      });
+      
+      // ✅ ALSO BROADCAST SERVER TIMER UPDATE
+      broadcastTimerUpdate(data.examId, {
+        timeLeft: room.timeLeft,
+        isTimerRunning: true,
+        roomId: data.roomId,
+        action: 'resumed'
       });
     }
   });
@@ -777,6 +1032,15 @@ io.on("connection", (socket) => {
         timestamp: Date.now(),
         teacherName: 'Teacher',
         message: `Added ${Math.floor(additionalSeconds/60)} minutes`
+      });
+      
+      // ✅ ALSO BROADCAST SERVER TIMER UPDATE
+      broadcastTimerUpdate(data.examId, {
+        timeLeft: room.timeLeft,
+        isTimerRunning: room.isTimerRunning,
+        roomId: data.roomId,
+        action: 'time-added',
+        additionalSeconds: additionalSeconds
       });
     }
   });
@@ -1427,7 +1691,9 @@ module.exports = {
   pendingExamsTracker, // ✅ Export for use in routes
   broadcastNewComment,
   broadcastDeletedComment,
-  isExamEnded // ✅ Export the helper function
+  isExamEnded, // ✅ Export the helper function
+  requestServerTime, // ✅ Export server time function
+  broadcastTimerUpdate // ✅ Export timer update function
 };
 
 // ===== START SERVER =====
@@ -1447,6 +1713,7 @@ const startServer = async () => {
       console.log(`✅ DETECTION SETTINGS: Enabled for individual student control`);
       console.log(`✅ DEBUG: Routes available at /api/debug-routes`);
       console.log(`✅ CLASS NOTIFICATIONS: Enabled for pending exams tracking`);
+      console.log(`✅ SERVER TIMER UPDATES: ENABLED for real-time synchronization`);
     });
   } catch (err) {
     console.error("❌ Server startup error:", err);

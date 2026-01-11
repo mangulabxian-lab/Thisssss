@@ -210,6 +210,91 @@ router.put('/profile', auth, async (req, res) => {
 });
 
 // ========================
+// ✅ PASSWORD CHANGE ENDPOINT
+// ========================
+
+router.put('/change-password', auth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    
+    console.log('🔐 Password change request for user:', req.user.id);
+
+    // Validate input
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Both current and new password are required" 
+      });
+    }
+
+    // Find user
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: "User not found" 
+      });
+    }
+
+    // Check if user has password (not Google OAuth user)
+    if (!user.password) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Password change not available for Google login accounts. Please use Google to manage your account." 
+      });
+    }
+
+    // Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Current password is incorrect" 
+      });
+    }
+
+    // Validate new password
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must contain: at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special character"
+      });
+    }
+
+    // Check if new password is same as current
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be different from current password"
+      });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // Update password
+    user.password = hashedPassword;
+    await user.save();
+
+    console.log('✅ Password updated successfully for user:', user.email);
+
+    res.json({ 
+      success: true,
+      message: "Password updated successfully" 
+    });
+
+  } catch (error) {
+    console.error('❌ Password change error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to change password. Please try again." 
+    });
+  }
+});
+
+// ========================
 // ✅ ROLE SELECTION ENDPOINTS
 // ========================
 

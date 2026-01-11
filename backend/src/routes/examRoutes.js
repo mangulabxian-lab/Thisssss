@@ -11,7 +11,8 @@ const pdfParse = require("pdf-parse");
 const mammoth = require("mammoth");
 const axios = require('axios');
 const User = require("../models/User");
-const StudentAttempts = require("../models/StudentAttempts"); // Added for violation summary
+const StudentAttempts = require("../models/StudentAttempts");
+const StudentExamSession = require("../models/StudentExamSession"); // ✅ ADDED: Import StudentExamSession model
 
 // ===== INITIALIZE ROUTER FIRST =====
 const router = express.Router();
@@ -68,7 +69,6 @@ router.post("/log-violation", async (req, res) => {
     }
 
     // Find student by socket ID or user ID
-    const StudentExamSession = require('../models/StudentExamSession');
     const session = await StudentExamSession.findOne({ socketId: studentSocketId });
     
     if (!session) {
@@ -542,7 +542,6 @@ router.get("/:examId/violation-summary", async (req, res) => {
     let examSessions = [];
     
     try {
-      const StudentExamSession = require('../models/StudentExamSession');
       examSessions = await StudentExamSession.find({ examId })
         .populate('studentId', 'name email');
       console.log(`📊 Found ${examSessions.length} exam sessions`);
@@ -748,13 +747,12 @@ router.get("/:examId/details", async (req, res) => {
   }
 });
 
-// ✅ START EXAM SESSION
+// ✅ START EXAM SESSION - UPDATED VERSION
 router.post("/:examId/start-session", async (req, res) => {
   try {
     const { examId } = req.params;
     
     console.log("🎯 START EXAM SESSION ROUTE HIT:", examId);
-    console.log("🔍 User ID:", req.user.id);
 
     const exam = await Exam.findById(examId);
     if (!exam) {
@@ -773,11 +771,12 @@ router.post("/:examId/start-session", async (req, res) => {
       });
     }
 
-    // Update exam to active
+    // Update exam to active AND started
     const updatedExam = await Exam.findByIdAndUpdate(
       examId,
       { 
         isActive: true,
+        isStarted: true, // ✅ ADD THIS LINE
         isDeployed: true,
         isPublished: true,
         startedAt: new Date(),
@@ -786,7 +785,7 @@ router.post("/:examId/start-session", async (req, res) => {
       { new: true }
     );
 
-    console.log("✅ Exam session started:", examId);
+    console.log("✅ Exam session started - students can now enter:", examId);
 
     res.json({
       success: true,
@@ -799,6 +798,98 @@ router.post("/:examId/start-session", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to start exam session"
+    });
+  }
+});
+
+// ✅ ADD THIS ENDPOINT: Check if student can enter exam
+router.get("/:examId/can-enter", async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const studentId = req.user.id;
+    
+    console.log("🚪 Checking if student can enter exam:", { examId, studentId });
+
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: "Exam not found"
+      });
+    }
+
+    // Check if user is student in this class
+    const classData = await Class.findById(exam.classId);
+    const isStudent = classData.members.some(member => 
+      member.userId && member.userId.toString() === studentId
+    );
+    
+    if (!isStudent) {
+      return res.status(403).json({
+        success: false,
+        message: "Only students in this class can join the exam"
+      });
+    }
+    
+    // Check if exam session is active AND started
+    const canEnter = exam.isActive && exam.isStarted;
+    
+    res.json({
+      success: true,
+      data: {
+        canEnter: canEnter,
+        isActive: exam.isActive,
+        isStarted: exam.isStarted || false,
+        examTitle: exam.title,
+        className: classData.name,
+        requiresWaitingRoom: exam.isActive && !exam.isStarted,
+        status: canEnter ? "ready" : "waiting",
+        message: canEnter 
+          ? "You can now enter the exam" 
+          : "Please wait for teacher to start the exam"
+      }
+    });
+    
+  } catch (err) {
+    console.error("❌ Check can enter error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to check exam status"
+    });
+  }
+});
+
+// ✅ GET TIMER STATUS
+router.get('/:examId/timer-status', async (req, res) => {
+  try {
+    const { examId } = req.params;
+    
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found'
+      });
+    }
+    
+    const remaining = exam.getRemainingTime();
+    
+    res.json({
+      success: true,
+      data: {
+        hasTimer: exam.liveClassSettings?.hasTimer || false,
+        remaining,
+        timerStartedAt: exam.liveClassSettings?.timerStartedAt,
+        timerEndsAt: exam.liveClassSettings?.timerEndsAt,
+        autoDisconnect: exam.liveClassSettings?.autoDisconnect
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error getting timer status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get timer status'
     });
   }
 });
@@ -1052,7 +1143,7 @@ router.post("/:examId/start-live-class", async (req, res) => {
         isDeployed: true,
         startedAt: new Date(),
         updatedAt: new Date()
-      },
+    },
       { new: true }
     );
     
@@ -1335,7 +1426,7 @@ router.get("/:examId/completion-status", async (req, res) => {
 
 // ===== CONTINUE WITH THE REST OF YOUR EXISTING ROUTES =====
 
-// ✅ GET EXAM FOR STUDENT TO TAKE
+// ✅ GET EXAM FOR STUDENT TO TAKE - UPDATED WITH TIMER SETTINGS
 router.get("/take/:examId", async (req, res) => {
   try {
     const { examId } = req.params;
@@ -1422,8 +1513,10 @@ router.get("/take/:examId", async (req, res) => {
       isDeployed: exam.isDeployed,
       isActive: exam.isActive,
       timeLimit: exam.timeLimit,
-      examType: exam.examType, // ✅ ADDED EXAM TYPE
-      isLiveClass: exam.isLiveClass, // ✅ ADDED LIVE CLASS FLAG
+      timerSettings: exam.timerSettings || {}, // ✅ ADDED TIMER SETTINGS
+      enforceTimeLimit: exam.enforceTimeLimit || false, // ✅ ADDED ENFORCE TIME LIMIT
+      examType: exam.examType || 'live-class', // ✅ ADDED EXAM TYPE WITH DEFAULT
+      isLiveClass: exam.isLiveClass || true, // ✅ ADDED LIVE CLASS FLAG WITH DEFAULT
       createdAt: exam.createdAt,
       updatedAt: exam.updatedAt
     };
@@ -1589,7 +1682,8 @@ router.post("/create/:classId", async (req, res) => {
       examType = 'live-class', // ✅ FORCE LIVE-CLASS TYPE
       timeLimit = 0, // ✅ NO TIME LIMIT FOR LIVE CLASS
       isLiveClass = true, // ✅ FORCE LIVE CLASS FLAG
-      timerSettings = {}
+      timerSettings = {},
+      enforceTimeLimit = false // ✅ ADDED ENFORCE TIME LIMIT
     } = req.body;
 
     console.log("🎯 CREATE QUIZ ROUTE HIT:", { 
@@ -1597,7 +1691,8 @@ router.post("/create/:classId", async (req, res) => {
       title, 
       examType, // ✅ LOG EXAM TYPE
       timeLimit,
-      isLiveClass
+      isLiveClass,
+      enforceTimeLimit
     });
 
     // Validate required fields
@@ -1635,13 +1730,14 @@ router.post("/create/:classId", async (req, res) => {
       isQuiz: true,
       examType: 'live-class', // ✅ FORCE LIVE-CLASS TYPE
       timeLimit: 0, // ✅ NO TIME LIMIT FOR LIVE CLASS
-      isLiveClass: true, // ✅ SET LIVE CLASS FLAG
       timerSettings: timerSettings || { // ✅ SAVE TIMER SETTINGS
         hours: 0,
         minutes: 0,
         seconds: 0,
         totalSeconds: 0
       },
+      enforceTimeLimit: enforceTimeLimit || false, // ✅ SAVE ENFORCE TIME LIMIT
+      isLiveClass: true, // ✅ SET LIVE CLASS FLAG
       isPublished: isPublished || false,
       settings: settings || {
         collectEmails: false,
@@ -1700,6 +1796,8 @@ router.put("/:examId/quiz-questions", async (req, res) => {
       totalPoints,
       examType, // ✅ ADDED
       timeLimit, // ✅ ADDED
+      timerSettings, // ✅ ADDED TIMER SETTINGS
+      enforceTimeLimit, // ✅ ADDED ENFORCE TIME LIMIT
       isLiveClass, // ✅ ADDED
       scheduledAt // ✅ ADDED - New scheduledAt field
     } = req.body;
@@ -1755,6 +1853,16 @@ router.put("/:examId/quiz-questions", async (req, res) => {
     // ✅ UPDATED: Handle timeLimit for live-class
     if (timeLimit !== undefined && exam.examType !== 'live-class') {
       updateData.timeLimit = timeLimit;
+    }
+    
+    // ✅ ADDED: Handle timerSettings
+    if (timerSettings !== undefined) {
+      updateData.timerSettings = timerSettings;
+    }
+    
+    // ✅ ADDED: Handle enforceTimeLimit
+    if (enforceTimeLimit !== undefined) {
+      updateData.enforceTimeLimit = enforceTimeLimit;
     }
     
     if (isLiveClass !== undefined) updateData.isLiveClass = isLiveClass;
@@ -2386,7 +2494,11 @@ router.get("/health", (req, res) => {
       "GET /:examId/violation-summary",
       // ✅ NEW VIOLATION LOGGING ROUTES
       "POST /log-violation",
-      "GET /:examId/violation-details/:studentId"
+      "GET /:examId/violation-details/:studentId",
+      // ✅ NEW CHECK CAN ENTER ENDPOINT
+      "GET /:examId/can-enter",
+      // ✅ NEW TIMER STATUS ENDPOINT
+      "GET /:examId/timer-status"
     ],
     timestamp: new Date().toISOString()
   });
@@ -2396,7 +2508,7 @@ router.get("/health", (req, res) => {
 router.get('/:examId/type', async (req, res) => {
   try {
     const { examId } = req.params;
-    const exam = await Exam.findById(examId).select('examType timerSettings timeLimit');
+    const exam = await Exam.findById(examId).select('examType timerSettings timeLimit enforceTimeLimit isLiveClass');
     
     if (!exam) {
       return res.status(404).json({ error: 'Exam not found' });
@@ -2405,8 +2517,10 @@ router.get('/:examId/type', async (req, res) => {
     res.json({
       success: true,
       examType: exam.examType || 'live-class', // ✅ DEFAULT TO LIVE-CLASS
-      timerSettings: exam.timerSettings || null,
-      timeLimit: exam.timeLimit || 0 // ✅ DEFAULT TO 0 FOR LIVE-CLASS
+      timerSettings: exam.timerSettings || {},
+      timeLimit: exam.timeLimit || 0, // ✅ DEFAULT TO 0 FOR LIVE-CLASS
+      enforceTimeLimit: exam.enforceTimeLimit || false,
+      isLiveClass: exam.isLiveClass || true
     });
   } catch (error) {
     console.error('Error getting exam type:', error);

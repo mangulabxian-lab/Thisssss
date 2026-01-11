@@ -1,4 +1,4 @@
-// backend/models/Exam.js - UPDATED VERSION - LIVE CLASS ONLY
+// backend/models/Exam.js - UPDATED VERSION - LIVE CLASS WITH TIME LIMITS (TIMER FIELDS ADDED)
 const mongoose = require("mongoose");
 
 // ✅ COMMENT SCHEMA
@@ -27,11 +27,6 @@ const examSchema = new mongoose.Schema({
     default: true
   },
 
-  // ✅ REMOVED ASYNC FIELDS:
-  // - timerSettings (deleted)
-  // - timerState (deleted)
-  // - studentTimers (deleted)
-  
   // ✅ STATUS & SCHEDULING FIELDS
   status: {
     type: String,
@@ -51,9 +46,11 @@ const examSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: false },
   startedAt: { type: Date },
   endedAt: { type: Date },
-  timeLimit: { 
-    type: Number, 
-    default: 0 // No time limit for live classes
+  
+  // ✅ NEW FIELD: isStarted - Indicates if the exam has been started by the teacher
+  isStarted: {
+    type: Boolean,
+    default: false
   },
   
   // ✅ JOINED STUDENTS TRACKING
@@ -99,6 +96,28 @@ const examSchema = new mongoose.Schema({
 
   // ✅ ADD COMMENT FUNCTIONALITY
   comments: [commentSchema],
+
+  // ✅ LIVE CLASS TIMER FIELDS
+  liveClassSettings: {
+    hasTimer: {
+      type: Boolean,
+      default: false
+    },
+    timerDuration: {
+      type: Number, // in minutes
+      default: 0
+    },
+    timerStartedAt: {
+      type: Date
+    },
+    timerEndsAt: {
+      type: Date
+    },
+    autoDisconnect: {
+      type: Boolean,
+      default: true
+    }
+  },
 
   // Quiz/Exam specific fields
   isQuiz: { type: Boolean, default: false },
@@ -165,7 +184,7 @@ const examSchema = new mongoose.Schema({
   publishedAt: { type: Date }
 });
 
-// ✅ UPDATED pre-save middleware - LIVE CLASS ONLY
+// ✅ UPDATED pre-save middleware - LIVE CLASS WITH TIME LIMITS
 examSchema.pre("save", function(next) {
   this.updatedAt = Date.now();
   
@@ -181,7 +200,6 @@ examSchema.pre("save", function(next) {
   // ✅ FORCE ALL EXAMS TO BE LIVE-CLASS
   this.examType = 'live-class';
   this.isLiveClass = true;
-  this.timeLimit = 0; // No time limit for live classes
   
   // ✅ UPDATED STATUS LOGIC FOR LIVE CLASSES ONLY
   if (this.isDeployed || this.isPublished) {
@@ -201,8 +219,24 @@ examSchema.pre("save", function(next) {
   next();
 });
 
-// ✅ ADDED Method to get exam info
+// ✅ UPDATED Method to get exam info (TIMER FIELDS ADDED)
 examSchema.methods.getExamInfo = function() {
+  const timerInfo = this.liveClassSettings ? {
+    hasTimer: this.liveClassSettings.hasTimer || false,
+    timerDuration: this.liveClassSettings.timerDuration || 0,
+    isTimerActive: this.isTimerActive(),
+    remainingTime: this.getRemainingTime(),
+    timerEndsAt: this.liveClassSettings.timerEndsAt,
+    autoDisconnect: this.liveClassSettings.autoDisconnect || true
+  } : {
+    hasTimer: false,
+    timerDuration: 0,
+    isTimerActive: false,
+    remainingTime: 0,
+    timerEndsAt: null,
+    autoDisconnect: true
+  };
+  
   return {
     _id: this._id,
     title: this.title,
@@ -210,8 +244,8 @@ examSchema.methods.getExamInfo = function() {
     classId: this.classId,
     examType: this.examType || 'live-class',
     isLiveClass: this.isLiveClass || true,
-    timeLimit: this.timeLimit || 0,
     isActive: this.isActive || false,
+    isStarted: this.isStarted || false, // ✅ Added isStarted to exam info
     status: this.status || 'draft',
     isDeployed: this.isDeployed || false,
     scheduledAt: this.scheduledAt,
@@ -221,7 +255,10 @@ examSchema.methods.getExamInfo = function() {
     createdAt: this.createdAt,
     publishedAt: this.publishedAt,
     joinedStudentsCount: this.joinedStudents ? this.joinedStudents.length : 0,
-    completedCount: this.completedBy ? this.completedBy.length : 0
+    completedCount: this.completedBy ? this.completedBy.length : 0,
+    startedAt: this.startedAt,
+    endedAt: this.endedAt,
+    liveClassSettings: timerInfo
   };
 };
 
@@ -237,6 +274,32 @@ examSchema.methods.getStudentCompletion = function(studentId) {
   return this.completedBy.find(completion => 
     completion.studentId.toString() === studentId.toString()
   );
+};
+
+// ✅ UPDATED: Add completion (timer info included)
+examSchema.methods.addStudentCompletion = function(studentId, completionData) {
+  const existingIndex = this.completedBy.findIndex(
+    completion => completion.studentId.toString() === studentId.toString()
+  );
+  
+  if (existingIndex >= 0) {
+    // Update existing completion
+    this.completedBy[existingIndex] = {
+      ...this.completedBy[existingIndex].toObject(),
+      ...completionData,
+      submittedAt: new Date()
+    };
+  } else {
+    // Add new completion
+    this.completedBy.push({
+      studentId,
+      ...completionData,
+      completedAt: new Date(),
+      submittedAt: new Date()
+    });
+  }
+  
+  return this.save();
 };
 
 // ✅ Method to add a comment to the exam
@@ -292,7 +355,6 @@ examSchema.methods.setExamType = function(examType) {
   // Force live-class only
   this.examType = 'live-class';
   this.isLiveClass = true;
-  this.timeLimit = 0;
   return this.save();
 };
 
@@ -311,10 +373,23 @@ examSchema.methods.isLiveSession = function() {
 examSchema.methods.startLiveSession = function() {
   // All exams are live-class now
   this.isActive = true;
+  this.isStarted = true; // ✅ Set isStarted to true when starting live session
   this.startedAt = new Date();
   this.status = 'published';
   this.isDeployed = true;
   this.isPublished = true;
+  return this.save();
+};
+
+// ✅ Method to mark exam as started
+examSchema.methods.markAsStarted = function() {
+  this.isStarted = true;
+  return this.save();
+};
+
+// ✅ Method to mark exam as not started
+examSchema.methods.markAsNotStarted = function() {
+  this.isStarted = false;
   return this.save();
 };
 
@@ -323,6 +398,73 @@ examSchema.methods.endLiveSession = function() {
   this.isActive = false;
   this.endedAt = new Date();
   this.status = 'completed';
+  return this.save();
+};
+
+// ✅ TIMER METHODS
+examSchema.methods.isTimerActive = function() {
+  if (!this.liveClassSettings?.hasTimer || !this.liveClassSettings.timerStartedAt) {
+    return false;
+  }
+  
+  const now = new Date();
+  const endsAt = this.liveClassSettings.timerEndsAt;
+  
+  return endsAt && now < endsAt;
+};
+
+examSchema.methods.getRemainingTime = function() {
+  if (!this.isTimerActive()) {
+    return 0;
+  }
+  
+  const now = new Date();
+  const endsAt = this.liveClassSettings.timerEndsAt;
+  const remainingMs = endsAt - now;
+  
+  return Math.max(0, Math.floor(remainingMs / 1000));
+};
+
+examSchema.methods.startTimer = async function(durationMinutes) {
+  if (!this.liveClassSettings?.hasTimer || durationMinutes <= 0) {
+    return false;
+  }
+  
+  const now = new Date();
+  const durationMs = durationMinutes * 60 * 1000;
+  
+  this.liveClassSettings.timerStartedAt = now;
+  this.liveClassSettings.timerEndsAt = new Date(now.getTime() + durationMs);
+  this.liveClassSettings.timerDuration = durationMinutes;
+  
+  await this.save();
+  return true;
+};
+
+examSchema.methods.stopTimer = async function() {
+  this.liveClassSettings.timerStartedAt = null;
+  this.liveClassSettings.timerEndsAt = null;
+  await this.save();
+};
+
+// ✅ Method to configure timer settings
+examSchema.methods.configureTimer = function(settings) {
+  if (!this.liveClassSettings) {
+    this.liveClassSettings = {};
+  }
+  
+  if (settings.hasTimer !== undefined) {
+    this.liveClassSettings.hasTimer = settings.hasTimer;
+  }
+  
+  if (settings.timerDuration !== undefined) {
+    this.liveClassSettings.timerDuration = settings.timerDuration;
+  }
+  
+  if (settings.autoDisconnect !== undefined) {
+    this.liveClassSettings.autoDisconnect = settings.autoDisconnect;
+  }
+  
   return this.save();
 };
 

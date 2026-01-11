@@ -1,3 +1,5 @@
+
+// /Frontend/src/components/StudentExamCamera.jsx - SIMPLIFIED VERSION
 import React, { useEffect, useRef, useState } from 'react';
 import cameraManager from '../lib/cameraManager';
 import './StudentExamCamera.css';
@@ -6,77 +8,97 @@ const StudentExamCamera = ({ examId, isRequired = true }) => {
   const videoRef = useRef(null);
   const [cameraState, setCameraState] = useState({
     isActive: false,
-    isInitialized: false,
     error: '',
     permissionGranted: false,
-    debugInfo: ''
+    debugInfo: 'Initializing...'
   });
 
-  // Initialize camera ONCE
+  // Initialize camera
   useEffect(() => {
     console.log('🚀 [DEBUG] StudentExamCamera mounting');
     console.log('🔍 [DEBUG] examId:', examId);
     console.log('🔍 [DEBUG] isRequired:', isRequired);
     
+    if (!isRequired) {
+      console.log('📹 [DEBUG] Camera not required, skipping');
+      return;
+    }
+    
     let mounted = true;
-
+    
     const initCamera = async () => {
-      if (!isRequired || !mounted) return;
-
       try {
-        console.log('🎥 [DEBUG] Initializing camera...');
-        setCameraState(prev => ({ 
-          ...prev, 
-          error: '', 
-          isInitialized: false,
-          debugInfo: 'Starting camera initialization...'
-        }));
+        console.log('🎥 [DEBUG] Starting camera initialization...');
+        setCameraState({
+          isActive: false,
+          error: '',
+          permissionGranted: false,
+          debugInfo: 'Requesting camera access...'
+        });
         
-        // Initialize camera through manager
-        await cameraManager.initializeCamera();
+        // Check if camera API is available
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('Camera API not supported in this browser');
+        }
         
-        console.log('✅ [DEBUG] Camera manager initialized');
+        // Get camera stream through manager
+        const stream = await cameraManager.initializeCamera();
         
-        // Attach video element
+        console.log('✅ [DEBUG] Camera stream obtained');
+        
         if (mounted && videoRef.current) {
-          console.log('📹 [DEBUG] Video element available, attaching...');
+          console.log('📹 [DEBUG] Video element found, attaching...');
+          
+          // Attach stream to our video element
           const attached = cameraManager.attachVideoElement(videoRef.current);
           
           if (attached) {
+            console.log('✅ [DEBUG] Camera attached successfully');
+            
+            // Force video display
+            setTimeout(() => {
+              if (videoRef.current && mounted) {
+                videoRef.current.style.display = 'block';
+                videoRef.current.play().catch(e => {
+                  console.warn('⚠️ [DEBUG] Auto-play prevented:', e.message);
+                });
+              }
+            }, 100);
+            
             setCameraState({
               isActive: true,
-              isInitialized: true,
               error: '',
               permissionGranted: true,
-              debugInfo: 'Camera attached and streaming'
+              debugInfo: 'Camera active and streaming'
             });
-            console.log('✅ [DEBUG] Camera attached successfully');
           } else {
+            console.error('❌ [DEBUG] Failed to attach camera');
             setCameraState({
               isActive: false,
-              isInitialized: true,
               error: 'Failed to attach camera to video element',
               permissionGranted: false,
-              debugInfo: 'Camera initialized but not attached to video'
+              debugInfo: 'Camera stream obtained but not attached'
             });
           }
-        } else {
-          setCameraState({
-            isActive: false,
-            isInitialized: true,
-            error: 'Video element not available',
-            permissionGranted: false,
-            debugInfo: 'Video ref is null'
-          });
         }
         
       } catch (error) {
-        console.error('❌ [DEBUG] Camera init error:', error);
+        console.error('❌ [DEBUG] Camera initialization failed:', error);
+        
         if (mounted) {
+          let errorMessage = error.message;
+          
+          if (error.name === 'NotAllowedError') {
+            errorMessage = 'Camera permission denied. Please allow camera access.';
+          } else if (error.name === 'NotFoundError') {
+            errorMessage = 'No camera found. Please connect a camera.';
+          } else if (error.name === 'NotReadableError') {
+            errorMessage = 'Camera is in use by another application.';
+          }
+          
           setCameraState({
             isActive: false,
-            isInitialized: true,
-            error: error.message,
+            error: errorMessage,
             permissionGranted: false,
             debugInfo: `Error: ${error.name} - ${error.message}`
           });
@@ -84,75 +106,98 @@ const StudentExamCamera = ({ examId, isRequired = true }) => {
       }
     };
 
-    // Start camera with delay
-    const timer = setTimeout(() => {
-      console.log('⏰ [DEBUG] Starting camera initialization timer');
+    // Start initialization with a small delay
+    const initTimer = setTimeout(() => {
       initCamera();
-    }, 500);
+    }, 100);
 
     // Cleanup
     return () => {
       console.log('🧹 [DEBUG] StudentExamCamera cleanup');
       mounted = false;
-      clearTimeout(timer);
+      clearTimeout(initTimer);
       
-      // Detach only our video element
+      // Detach our video element from manager
       if (videoRef.current) {
         cameraManager.detachVideoElement(videoRef.current);
       }
     };
   }, [isRequired, examId]);
 
-  // Force camera display
+  // Force video to play when component is mounted
   useEffect(() => {
-    // Force camera display
     const videoEl = videoRef.current;
-    if (videoEl) {
-      videoEl.style.display = 'block';
-      videoEl.style.width = '100%';
-      videoEl.style.height = '240px';
-      videoEl.style.backgroundColor = '#000';
+    if (videoEl && cameraState.isActive) {
+      const tryPlay = () => {
+        videoEl.play().catch(e => {
+          console.warn('⚠️ [DEBUG] Video play failed, trying again on click:', e.message);
+          // Try again on user interaction
+          document.addEventListener('click', () => {
+            videoEl.play().catch(e => console.warn('Still blocked:', e.message));
+          }, { once: true });
+        });
+      };
+      
+      setTimeout(tryPlay, 300);
     }
-  }, []);
+  }, [cameraState.isActive]);
 
   const retryCamera = async () => {
     console.log('🔄 [DEBUG] Retrying camera...');
     try {
-      setCameraState(prev => ({ 
-        ...prev, 
+      setCameraState({
+        isActive: false,
         error: '',
+        permissionGranted: false,
         debugInfo: 'Retrying camera access...'
-      }));
+      });
       
-      await cameraManager.initializeCamera();
+      // Clean up and retry
+      cameraManager.cleanup();
       
-      if (videoRef.current) {
-        cameraManager.attachVideoElement(videoRef.current);
-        setCameraState({
-          isActive: true,
-          isInitialized: true,
-          error: '',
-          permissionGranted: true,
-          debugInfo: 'Camera retry successful'
-        });
-      }
+      // Small delay before retry
+      setTimeout(async () => {
+        try {
+          await cameraManager.initializeCamera();
+          
+          if (videoRef.current) {
+            cameraManager.attachVideoElement(videoRef.current);
+            setCameraState({
+              isActive: true,
+              error: '',
+              permissionGranted: true,
+              debugInfo: 'Camera retry successful'
+            });
+          }
+        } catch (error) {
+          console.error('❌ [DEBUG] Camera retry failed:', error);
+          setCameraState(prev => ({
+            ...prev,
+            error: error.message,
+            debugInfo: `Retry failed: ${error.name}`
+          }));
+        }
+      }, 500);
+      
     } catch (error) {
-      console.error('❌ [DEBUG] Camera retry failed:', error);
-      setCameraState(prev => ({ 
-        ...prev, 
+      console.error('❌ [DEBUG] Retry error:', error);
+      setCameraState(prev => ({
+        ...prev,
         error: error.message,
-        debugInfo: `Retry failed: ${error.name}`
+        debugInfo: `Retry error: ${error.name}`
       }));
     }
   };
 
   const openCameraSettings = () => {
-    // Guide user to camera settings
     alert('📸 Camera Permission Help:\n\n' +
-          '1. Click the camera icon in your browser address bar\n' +
-          '2. Select "Always allow" or "Allow" for camera\n' +
+          '1. Look for a camera icon in your browser address bar\n' +
+          '2. Click it and select "Allow" or "Always allow"\n' +
           '3. Refresh this page\n\n' +
-          'Or go to: chrome://settings/content/camera');
+          'Or go to browser settings:\n' +
+          'Chrome: chrome://settings/content/camera\n' +
+          'Edge: edge://settings/content/camera\n' +
+          'Firefox: about:preferences#privacy');
   };
 
   return (
@@ -167,7 +212,7 @@ const StudentExamCamera = ({ examId, isRequired = true }) => {
           </span>
         </div>
         
-        {!cameraState.isActive && cameraState.isInitialized && (
+        {!cameraState.isActive && (
           <div className="camera-actions">
             <button onClick={retryCamera} className="retry-camera-btn">
               🔄 Retry
@@ -180,6 +225,7 @@ const StudentExamCamera = ({ examId, isRequired = true }) => {
       </div>
 
       <div className="camera-preview">
+        {/* VIDEO ELEMENT - THIS MUST BE VISIBLE */}
         <video 
           ref={videoRef}
           autoPlay 
@@ -195,33 +241,24 @@ const StudentExamCamera = ({ examId, isRequired = true }) => {
           }}
         />
         
-        {(!cameraState.isActive || !cameraState.permissionGranted) && (
+        {/* OFFLINE/ERROR STATE */}
+        {!cameraState.isActive && (
           <div className="camera-offline">
             <div className="offline-icon">
-              {cameraState.error.includes('permission') ? '🔒' : '📷'}
+              {cameraState.error.includes('permission') ? '🔒' : '📷❌'}
             </div>
             <h4>Camera Required</h4>
             <p>{cameraState.error || 'Camera access is required for this exam'}</p>
             
-            {cameraState.error.includes('permission') ? (
-              <>
-                <button onClick={openCameraSettings} className="enable-camera-btn">
-                  🔓 Open Camera Settings
-                </button>
-                <p className="help-text">Then refresh this page</p>
-              </>
-            ) : (
-              <button onClick={retryCamera} className="enable-camera-btn">
-                📸 Enable Camera
-              </button>
-            )}
+            <button onClick={retryCamera} className="enable-camera-btn">
+              {cameraState.error.includes('permission') ? '🔓 Grant Permission' : '📸 Enable Camera'}
+            </button>
             
-            {/* Debug info (visible in development) */}
-            {process.env.NODE_ENV === 'development' && (
-              <div className="debug-info">
-                <small>{cameraState.debugInfo}</small>
-              </div>
-            )}
+            {/* DEBUG INFO */}
+            <div className="debug-info">
+              <small>{cameraState.debugInfo}</small>
+              <small>Browser: {navigator.userAgent}</small>
+            </div>
           </div>
         )}
       </div>

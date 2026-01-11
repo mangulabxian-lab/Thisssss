@@ -7058,3 +7058,33 @@ body, html {
 .bg-white.rounded-lg {
   pointer-events: auto;
 }
+/* FIX FOR INPUT FOCUS ISSUES */
+input:focus, 
+textarea:focus, 
+select:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5) !important;
+  border-color: transparent !important;
+}
+
+/* Prevent modal from closing when clicking inside inputs */
+.modal-content input,
+.modal-content textarea,
+.modal-content button {
+  pointer-events: auto !important;
+}
+
+/* Fix for focus trapping */
+.modal-open {
+  overflow: hidden;
+}
+
+/* Ensure inputs are clickable */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+textarea {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text !important;
+}

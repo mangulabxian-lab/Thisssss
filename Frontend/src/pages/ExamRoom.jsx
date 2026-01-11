@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { io } from "socket.io-client";
-import { FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash, FaUser, FaComment, FaExclamationTriangle, FaEye } from "react-icons/fa";
+import { FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash, FaUser, FaComment, FaExclamationTriangle } from "react-icons/fa";
 import StudentExamCamera from '../components/StudentExamCamera';
 
-// Face detection hook
-const useFaceDetection = (videoRef, isStudent, isEnabled = true) => {
+// Face detection hook - UPDATED to not rely on videoRef
+const useFaceDetection = (isStudent, isEnabled = true) => {
   const [faceData, setFaceData] = useState({
     faceDetected: true,
     faceCount: 0,
@@ -30,46 +30,6 @@ const useFaceDetection = (videoRef, isStudent, isEnabled = true) => {
     checkServer();
   }, []);
 
-  useEffect(() => {
-    if (!isStudent || !isEnabled || !videoRef.current || serverStatus !== 'connected') return;
-
-    const captureAndDetect = async () => {
-      try {
-        const video = videoRef.current;
-        if (!video || video.readyState !== 4) return;
-
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        const imageData = canvas.toDataURL('image/jpeg', 0.8);
-        
-        const response = await fetch('http://localhost:5000/detect-faces', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: imageData })
-        });
-        
-        if (response.ok) {
-          const result = await response.json();
-          setFaceData({
-            faceDetected: result.faceDetected,
-            faceCount: result.faceCount,
-            isLookingAway: result.isLookingAway,
-            suspiciousActivities: result.suspiciousActivities || []
-          });
-        }
-      } catch (error) {
-        console.log('Face detection temporarily unavailable');
-      }
-    };
-
-    const interval = setInterval(captureAndDetect, 3000);
-    return () => clearInterval(interval);
-  }, [isStudent, isEnabled, serverStatus]);
-
   return { ...faceData, serverStatus };
 };
 
@@ -93,37 +53,23 @@ export default function ExamRoom({ roomId }) {
   const [peerInfo, setPeerInfo] = useState({});
   const [camOn, setCamOn] = useState(true);
   const [micOn, setMicOn] = useState(true);
-  const [timer, setTimer] = useState(0);
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [messageInput, setMessageInput] = useState("");
-  const examDuration = 30 * 60;
   const socketRef = useRef();
   const localStreamRef = useRef();
   const peersRef = useRef({});
   const makingOfferRef = useRef(false);
   const isInitializedRef = useRef(false);
 
-  // Face detection for student
+  // Face detection for student - UPDATED to not pass videoRef
   const {
     faceDetected,
     faceCount,
     isLookingAway,
     suspiciousActivities,
     serverStatus
-  } = useFaceDetection(localVideoRef, !isTeacher, camOn);
-
-  // Timer
-  useEffect(() => {
-    const interval = setInterval(() => setTimer(prev => (prev < examDuration ? prev + 1 : prev)), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
-    const s = (seconds % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
-  };
+  } = useFaceDetection(!isTeacher, camOn);
 
   // Cleanup function
   const cleanup = () => {
@@ -548,7 +494,7 @@ export default function ExamRoom({ roomId }) {
         background: "#f8f9fa",
         position: "relative"
       }}>
-        {/* Top Bar - Subject Name & Timer */}
+        {/* Top Bar - Subject Name */}
         <div style={{
           padding: "15px 20px",
           background: "white",
@@ -568,17 +514,6 @@ export default function ExamRoom({ roomId }) {
               fontSize: "16px"
             }}>
               {className}
-            </div>
-            <div style={{
-              background: "#f8f9fa",
-              border: "1px solid #dadce0",
-              borderRadius: "4px",
-              padding: "8px 16px",
-              fontWeight: "bold",
-              color: "#5f6368",
-              fontSize: "16px"
-            }}>
-               {formatTime(examDuration - timer)}
             </div>
           </div>
           <div style={{ fontWeight: "bold", color: "#5f6368" }}>
@@ -1019,9 +954,6 @@ export default function ExamRoom({ roomId }) {
         <h2 style={{ color: "#fff7f7ff", textShadow: "1px 1px 3px rgba(0, 0, 0, 1)" }}>
           {classSubject} - Teacher View
         </h2>
-        <div style={{ fontWeight: "bold", color: "#fff" }}>
-          Timer: {formatTime(examDuration - timer)}
-        </div>
       </div>
 
       {/* Video Grid */}

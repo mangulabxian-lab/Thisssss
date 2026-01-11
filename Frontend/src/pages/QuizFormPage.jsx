@@ -1,4 +1,4 @@
-// frontend/src/pages/QuizFormPage.jsx - UPDATED TO REMOVE ASYNC OPTIONS
+// frontend/src/pages/QuizFormPage.jsx - UPDATED WITH IMPROVED DUPLICATE PREVENTION
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { createQuiz, updateQuiz, getQuizForEdit, deployExam, uploadFileAndParse } from '../lib/api';
@@ -14,12 +14,6 @@ const QuizFormPage = () => {
   // ===== EXISTING STATES =====
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [examType, setExamType] = useState('live-class'); // Default to live-class
-  const [showTimerModal, setShowTimerModal] = useState(false);
-  const [examTimer, setExamTimer] = useState({
-    hours: 0,
-    minutes: 0,
-    seconds: 0
-  });
 
   // ===== EXPIRATION DATE STATES =====
   const [showExpirationModal, setShowExpirationModal] = useState(false);
@@ -32,6 +26,16 @@ const QuizFormPage = () => {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("23:59");
+
+  // ===== TIMER STATES =====
+  const [showTimerModal, setShowTimerModal] = useState(false);
+  const [timerSettings, setTimerSettings] = useState({
+    hasTimer: false,
+    hours: 0,
+    minutes: 30,
+    seconds: 0,
+    autoDisconnect: true
+  });
 
   const [quiz, setQuiz] = useState({
     title: 'Untitled form',
@@ -77,6 +81,26 @@ const QuizFormPage = () => {
           setExpirationTime(expDate.toTimeString().slice(0, 5));
           setHasExpiration(true);
         }
+        
+        // Load timer settings if they exist
+        if (existingExamFromState.liveClassSettings) {
+          const timerSettings = existingExamFromState.liveClassSettings;
+          if (timerSettings.hasTimer && timerSettings.timerDuration) {
+            const totalSeconds = timerSettings.timerDuration * 60; // Convert minutes to seconds
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+            
+            setTimerSettings({
+              hasTimer: true,
+              hours: hours,
+              minutes: minutes,
+              seconds: seconds,
+              autoDisconnect: timerSettings.autoDisconnect !== false
+            });
+          }
+        }
+        
       } else if (examId) {
         const response = await getQuizForEdit(examId);
         if (response.success) {
@@ -90,6 +114,25 @@ const QuizFormPage = () => {
             setExpirationTime(expDate.toTimeString().slice(0, 5));
             setHasExpiration(true);
           }
+          
+          // Load timer settings if they exist
+          if (response.data.liveClassSettings) {
+            const timerSettings = response.data.liveClassSettings;
+            if (timerSettings.hasTimer && timerSettings.timerDuration) {
+              const totalSeconds = timerSettings.timerDuration * 60; // Convert minutes to seconds
+              const hours = Math.floor(totalSeconds / 3600);
+              const minutes = Math.floor((totalSeconds % 3600) / 60);
+              const seconds = totalSeconds % 60;
+              
+              setTimerSettings({
+                hasTimer: true,
+                hours: hours,
+                minutes: minutes,
+                seconds: seconds,
+                autoDisconnect: timerSettings.autoDisconnect !== false
+              });
+            }
+          }
         }
       }
     } catch (error) {
@@ -102,9 +145,16 @@ const QuizFormPage = () => {
 
   useEffect(() => {
     return () => {
-      localStorage.removeItem('creatingQuiz');
+      localStorage.removeItem('quizCreationInProgress');
     };
   }, []);
+
+  // ===== TIMER HELPER FUNCTION =====
+  const calculateTotalSeconds = () => {
+    return (timerSettings.hours * 3600) + 
+           (timerSettings.minutes * 60) + 
+           timerSettings.seconds;
+  };
 
   // ===== EXPIRATION DATE HANDLERS =====
   const handleExpirationToggle = () => {
@@ -159,55 +209,19 @@ const QuizFormPage = () => {
     });
   };
 
-  // ===== UPDATED: OPTIONS & EXAM TYPE HANDLERS =====
+  // ===== UPDATED: OPTIONS & EXAM TYPE HANDLERS WITH TIMER PROMPT =====
   const handleOptionSelect = (option) => {
     setShowOptionsMenu(false);
     
     if (option === 'live-class') {
       setExamType('live-class');
-      setExamTimer({ hours: 0, minutes: 0, seconds: 0 });
-      alert('🎥 Live Class selected! Students will join in real-time without time limits.');
+      alert('🎥 Live Class selected! Students can join anytime.');
     }
   };
 
-  const handleTimerChange = (field, value) => {
-    const numValue = parseInt(value) || 0;
-    
-    let limitedValue = numValue;
-    if (field === 'hours') limitedValue = Math.min(23, Math.max(0, numValue));
-    if (field === 'minutes') limitedValue = Math.min(59, Math.max(0, numValue));
-    if (field === 'seconds') limitedValue = Math.min(59, Math.max(0, numValue));
-    
-    setExamTimer(prev => ({
-      ...prev,
-      [field]: limitedValue
-    }));
-  };
-
-  const applyTimerSettings = () => {
-    const totalSeconds = (examTimer.hours * 3600) + (examTimer.minutes * 60) + examTimer.seconds;
-    
-    console.log("⏰ Live Class configured with no time limit");
-    setShowTimerModal(false);
-    alert(`✅ Live Class configured! Students will join in real-time without time limits.`);
-  };
-
-  const formatTime = (seconds) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    
-    if (hrs > 0) {
-      return `${hrs}h ${mins}m ${secs}s`;
-    } else if (mins > 0) {
-      return `${mins}m ${secs}s`;
-    } else {
-      return `${secs}s`;
-    }
-  };
-
-  // ===== UPDATED: saveQuizToBackend WITH ONLY LIVE CLASS =====
+  // ===== UPDATED: IMPROVED saveQuizToBackend WITH ROBUST DUPLICATE PREVENTION =====
   const saveQuizToBackend = async (extraFields = {}) => {
+    // Prevent multiple simultaneous calls
     if (loading) {
       console.log("⏸️ Duplicate call prevented - already saving");
       throw new Error("Already saving, please wait");
@@ -221,10 +235,38 @@ const QuizFormPage = () => {
       throw new Error("Error: Class information is missing. Please go back and try again.");
     }
 
-    const questionsForBackend = quiz.questions.map(({ id, ...question }) => question);
+    // Generate a unique request ID for this specific save attempt
+    const requestId = `${classId}-${quiz.title}-${Date.now()}`;
+    const storageKey = 'quizCreationInProgress';
     
-    // ✅ USE ONLY LIVE CLASS TIMER (0 seconds)
-    const timeLimitSeconds = 0;
+    // Check if another quiz creation is in progress for this class
+    const existingRequest = localStorage.getItem(storageKey);
+    if (existingRequest) {
+      try {
+        const { classId: existingClassId, timestamp } = JSON.parse(existingRequest);
+        const timeDiff = Date.now() - timestamp;
+        
+        // If the same class is trying to create a quiz within 3 seconds, prevent it
+        if (existingClassId === classId && timeDiff < 3000) {
+          console.log("⚠️ Rapid duplicate quiz creation prevented for class:", classId);
+          setLoading(false);
+          throw new Error("Please wait a moment before creating another quiz.");
+        }
+      } catch (parseError) {
+        console.warn("Could not parse existing request data:", parseError);
+        localStorage.removeItem(storageKey);
+      }
+    }
+
+    // Store current request in localStorage to prevent duplicates
+    localStorage.setItem(storageKey, JSON.stringify({
+      classId,
+      title: quiz.title,
+      requestId,
+      timestamp: Date.now()
+    }));
+
+    const questionsForBackend = quiz.questions.map(({ id, ...question }) => question);
 
     // Prepare expiration date
     let expirationDateTime = null;
@@ -239,9 +281,14 @@ const QuizFormPage = () => {
         questions: questionsForBackend,
         totalPoints: quiz.totalPoints,
         examType: 'live-class', // ✅ FORCE LIVE-CLASS
-        timeLimit: 0, // ✅ NO TIME LIMIT
         isLiveClass: true, // ✅ ALWAYS TRUE
-        timerSettings: null, // ✅ NO TIMER SETTINGS NEEDED
+        // ✅ ADD TIMER SETTINGS
+        liveClassSettings: {
+          hasTimer: timerSettings.hasTimer,
+          timerDuration: timerSettings.hasTimer ? 
+            Math.floor(calculateTotalSeconds() / 60) : 0,
+          autoDisconnect: timerSettings.autoDisconnect
+        },
         ...extraFields
       };
 
@@ -262,19 +309,14 @@ const QuizFormPage = () => {
         savedExamId = examIdToUpdate;
       } else {
         console.log("📝 Creating new quiz for class:", classId);
-
-        const quizKey = `${classId}-${quiz.title}-${Date.now()}`;
-        const existingKey = localStorage.getItem('creatingQuiz');
         
-        if (existingKey && existingKey === quizKey) {
-          console.log("⚠️ Duplicate quiz creation prevented");
-          throw new Error("Quiz is already being created");
-        }
-        
-        localStorage.setItem('creatingQuiz', quizKey);
+        // Optional: Add backend-side duplicate check here
+        // const duplicateCheck = await checkForDuplicateQuiz(classId, quiz.title);
+        // if (duplicateCheck.exists) {
+        //   throw new Error(`A quiz titled "${quiz.title}" already exists in this class.`);
+        // }
 
         response = await createQuiz(classId, quizData);
-        localStorage.removeItem('creatingQuiz');
         savedExamId = response.data._id;
       }
 
@@ -282,12 +324,19 @@ const QuizFormPage = () => {
         throw new Error(response.message || "Failed to save quiz");
       }
 
+      console.log("✅ Quiz saved successfully:", savedExamId);
       return { savedExamId, response };
       
     } catch (error) {
       console.error("❌ Error in saveQuizToBackend:", error);
+      
+      // Clean up localStorage on error
+      localStorage.removeItem(storageKey);
+      
+      // Re-throw the error for the caller to handle
       throw error;
     } finally {
+      // Always clean up and reset loading state
       setLoading(false);
     }
   };
@@ -547,9 +596,17 @@ const QuizFormPage = () => {
 
             {showOptionsMenu && (
               <div className="options-dropdown">
-                {/* ✅ REMOVED ASYNC OPTION, KEEP ONLY LIVE CLASS */}
+                {/* ✅ LIVE CLASS */}
                 <button onClick={() => handleOptionSelect('live-class')}>
                   🎥 Live Class
+                </button>
+                
+                {/* ✅ ADD TIMER OPTION */}
+                <button onClick={() => {
+                  setShowTimerModal(true);
+                  setShowOptionsMenu(false);
+                }}>
+                  ⏱️ Set Exam Timer
                 </button>
                 
                 {/* Keep expiration button */}
@@ -624,7 +681,7 @@ const QuizFormPage = () => {
               placeholder="Form description"
             />
             
-            {/* ✅ UPDATED METADATA SECTION - REMOVED ASYNC TIMER DISPLAY */}
+            {/* ✅ UPDATED METADATA SECTION WITH TIMER DISPLAY */}
             <div className="quiz-metadata">
               <div className="total-points-display">
                 Total Points: <strong>{quiz.totalPoints}</strong>
@@ -634,7 +691,40 @@ const QuizFormPage = () => {
                 Exam Type: <strong>🎥 Live Class</strong>
               </div>
               
-              {/* ✅ REMOVED ASYNC TIMER DISPLAY SECTION */}
+              {/* ✅ ADD TIMER DISPLAY */}
+              <div className="timer-display">
+                ⏱️ Timer: <strong className="timer-value">
+                  {timerSettings.hasTimer ? 
+                    `${timerSettings.hours.toString().padStart(2, '0')}:${timerSettings.minutes.toString().padStart(2, '0')}:${timerSettings.seconds.toString().padStart(2, '0')}` : 
+                    'No timer set'}
+                </strong>
+                {timerSettings.hasTimer ? (
+                  <div className="timer-actions">
+                    <button 
+                      className="edit-timer-btn"
+                      onClick={() => setShowTimerModal(true)}
+                      title="Edit timer"
+                    >
+                      ✏️
+                    </button>
+                    <button 
+                      className="remove-timer-btn"
+                      onClick={() => setTimerSettings({...timerSettings, hasTimer: false})}
+                      title="Remove timer"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                ) : (
+                  <button 
+                    className="set-timer-btn"
+                    onClick={() => setShowTimerModal(true)}
+                    title="Set timer"
+                  >
+                    ➕ Set
+                  </button>
+                )}
+              </div>
               
               {/* KEEP EXPIRATION DISPLAY */}
               <div className="expiration-display">
@@ -802,9 +892,7 @@ const QuizFormPage = () => {
         </div>
       )}
 
-      {/* ✅ REMOVED TIMER MODAL SINCE NO ASYNC OPTION */}
-
-      {/* NEW EXPIRATION MODAL */}
+      {/* EXPIRATION MODAL */}
       {showExpirationModal && (
         <div className="modal-overlay" onClick={() => setShowExpirationModal(false)}>
           <div className="expiration-modal" onClick={(e) => e.stopPropagation()}>
@@ -888,11 +976,118 @@ const QuizFormPage = () => {
           </div>
         </div>
       )}
+
+      {/* ✅ TIMER MODAL */}
+      {showTimerModal && (
+        <div className="modal-overlay" onClick={() => setShowTimerModal(false)}>
+          <div className="timer-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>⏱️ Set Exam Timer</h2>
+              <button className="close-modal" onClick={() => setShowTimerModal(false)}>×</button>
+            </div>
+            
+            <div className="modal-content">
+              <div className="timer-info">
+                <p>Set a time limit for this live class exam.</p>
+              </div>
+              
+              <div className="timer-toggle">
+                <label className="toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={timerSettings.hasTimer}
+                    onChange={(e) => setTimerSettings({...timerSettings, hasTimer: e.target.checked})}
+                  />
+                  <span className="toggle-slider"></span>
+                  <span className="toggle-text">Enable Timer</span>
+                </label>
+              </div>
+              
+              {timerSettings.hasTimer && (
+                <>
+                  <div className="timer-inputs">
+                    <div className="time-input-group">
+                      <label>Hours</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="23"
+                        value={timerSettings.hours}
+                        onChange={(e) => setTimerSettings({...timerSettings, hours: parseInt(e.target.value) || 0})}
+                        className="time-input"
+                      />
+                    </div>
+                    
+                    <div className="time-input-group">
+                      <label>Minutes</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="59"
+                        value={timerSettings.minutes}
+                        onChange={(e) => setTimerSettings({...timerSettings, minutes: parseInt(e.target.value) || 0})}
+                        className="time-input"
+                      />
+                    </div>
+                    
+                    <div className="time-input-group">
+                      <label>Seconds</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="59"
+                        value={timerSettings.seconds}
+                        onChange={(e) => setTimerSettings({...timerSettings, seconds: parseInt(e.target.value) || 0})}
+                        className="time-input"
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="timer-preview">
+                    <strong>Total Duration:</strong>
+                    <div className="preview-duration">
+                      {`${timerSettings.hours.toString().padStart(2, '0')}:${timerSettings.minutes.toString().padStart(2, '0')}:${timerSettings.seconds.toString().padStart(2, '0')}`}
+                      <span className="total-seconds">({calculateTotalSeconds()} seconds)</span>
+                    </div>
+                  </div>
+                  
+                  <div className="auto-disconnect-toggle">
+                    <label className="toggle-label">
+                      <input
+                        type="checkbox"
+                        checked={timerSettings.autoDisconnect}
+                        onChange={(e) => setTimerSettings({...timerSettings, autoDisconnect: e.target.checked})}
+                      />
+                      <span className="toggle-slider"></span>
+                      <span className="toggle-text">Auto-disconnect students when timer ends</span>
+                    </label>
+                  </div>
+                </>
+              )}
+            </div>
+            
+            <div className="modal-actions">
+              <button className="cancel-btn" onClick={() => setShowTimerModal(false)}>
+                Cancel
+              </button>
+              <button className="save-timer-btn" onClick={() => {
+                if (timerSettings.hasTimer && calculateTotalSeconds() <= 0) {
+                  alert('Please set a valid timer duration');
+                  return;
+                }
+                setShowTimerModal(false);
+              }}>
+                ✅ Save Timer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-// QuestionEditor Component
+// QuestionEditor Component (unchanged)
 const QuestionEditor = ({ question, index, onUpdate, onDelete, onDuplicate }) => {
   const handleTitleChange = (e) => {
     onUpdate({ title: e.target.value });

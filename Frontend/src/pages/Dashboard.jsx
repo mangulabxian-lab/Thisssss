@@ -1,4 +1,4 @@
-// src/pages/Dashboard.jsx - UPDATED WITH LIVE CLASSES ONLY
+// src/pages/Dashboard.jsx - UPDATED WITH SIMPLIFIED SETTINGS
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPlus, FaHome, FaCalendarAlt, FaArchive, FaCog, FaSignOutAlt, FaBook, FaUserPlus, FaBars, FaChevronLeft, FaChevronRight, FaEdit, FaTrash, FaEllipsisV, FaChevronDown, FaEnvelope, FaUserMinus, FaVolumeMute, FaVolumeUp, FaSave, FaTimes, FaCheckCircle, FaClock, FaExclamationTriangle } from "react-icons/fa";
@@ -18,7 +18,6 @@ import ClassCard from "../components/ClassCard";
 // ✅ ADDED: Import separated tab components from components folder
 import PeopleTab from '../components/PeopleTab';
 import GradesTab from '../components/GradesTab';
-
 
 // Utility function to format exam type display
 const getExamTypeDisplay = (exam) => {
@@ -143,6 +142,15 @@ export default function Dashboard() {
   });
   const [savingSettings, setSavingSettings] = useState(false);
 
+  // ===== CHANGE PASSWORD MODAL STATES (ADDED) =====
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [changingPassword, setChangingPassword] = useState(false);
+
   // ===== EXAM DEPLOYMENT STATES =====
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [examToDeploy, setExamToDeploy] = useState(null);
@@ -261,6 +269,10 @@ export default function Dashboard() {
   const commentDeleteMenuRef = useRef(null);
   const actionsDropdownRef = useRef(null);
   const settingsModalRef = useRef(null);
+
+  // ===== LOCAL STATE FOR SETTINGS INPUTS =====
+  const [localName, setLocalName] = useState("");
+  const [localEmail, setLocalEmail] = useState("");
 
   // ===== SEPARATE CLASSES BY ROLE =====
   const teachingClasses = classes.filter(classData => classData.userRole === "teacher" || classData.isTeacher);
@@ -721,24 +733,33 @@ export default function Dashboard() {
   // ===== SETTINGS FUNCTIONS =====
   const handleManageSettings = () => {
     setSettingsData({
-      name: user.name,
-      email: user.email,
+      name: user.name || "",
+      email: user.email || "",
       profilePicture: user.profileImage || '',
     });
+    setLocalName(user.name || "");
+    setLocalEmail(user.email || "");
     setShowSettingsModal(true);
   };
 
   const handleSaveSettings = async () => {
+    const updatedSettings = {
+      ...settingsData,
+      name: localName,
+      email: localEmail
+    };
+    
     setSavingSettings(true);
     try {
       const response = await api.put("/auth/profile", {
-        name: settingsData.name,
-        email: settingsData.email,
-        profilePicture: settingsData.profilePicture
+        name: updatedSettings.name,
+        email: updatedSettings.email,
+        profilePicture: updatedSettings.profilePicture
       });
       
       if (response.data.success) {
-        setUser(prev => ({ ...prev, ...settingsData, profileImage: settingsData.profilePicture }));
+        setSettingsData(updatedSettings);
+        setUser(prev => ({ ...prev, ...updatedSettings, profileImage: updatedSettings.profilePicture }));
         alert("✅ Settings updated successfully!");
         setShowSettingsModal(false);
       } else {
@@ -2516,163 +2537,407 @@ export default function Dashboard() {
     );
   };
 
-  // ✅ FIXED: SettingsModal Component
-  const SettingsModal = () => {
-    if (!showSettingsModal) return null;
+  // ===== SETTINGS MODAL COMPONENT - UPDATED WITH CHANGE PASSWORD LINK =====
+  // ✅ FIXED COMPLETELY: SettingsModal Component with working inputs
+const SettingsModal = () => {
+  if (!showSettingsModal) return null;
 
-    const nameInputRef = useRef(null);
-    const emailInputRef = useRef(null);
+  const [localName, setLocalName] = useState(settingsData.name || "");
+  const [localEmail, setLocalEmail] = useState(settingsData.email || "");
 
-    // ✅ FIXED: Use useEffect properly
-    useEffect(() => {
-      if (showSettingsModal) {
-        // Small delay to ensure modal is rendered
-        setTimeout(() => {
-          nameInputRef.current?.focus();
-        }, 100);
-      }
-    }, [showSettingsModal]);
+  // Initialize local states when modal opens
+  useEffect(() => {
+    if (showSettingsModal) {
+      setLocalName(user.name || "");
+      setLocalEmail(user.email || "");
+    }
+  }, [showSettingsModal]);
 
-    // ✅ FIXED: Prevent event bubbling
-    const handleInputFocus = (e) => {
-      e.stopPropagation();
+  const handleModalClick = (e) => {
+    e.stopPropagation();
+  };
+
+  // Simple input handlers - NO FOCUS/ONBLUR LOGIC
+  const handleNameChange = (e) => {
+    setLocalName(e.target.value);
+  };
+
+  const handleEmailChange = (e) => {
+    setLocalEmail(e.target.value);
+  };
+
+  const handleSave = async () => {
+    if (!localName.trim() || !localEmail.trim()) {
+      alert("Please fill in both name and email");
+      return;
+    }
+
+    const updatedSettings = {
+      ...settingsData,
+      name: localName,
+      email: localEmail
     };
 
-    const handleInputBlur = (e) => {
-      e.stopPropagation();
+    setSavingSettings(true);
+    try {
+      const response = await api.put("/auth/profile", {
+        name: updatedSettings.name,
+        email: updatedSettings.email,
+        profilePicture: updatedSettings.profilePicture
+      });
+
+      if (response.data.success) {
+        setSettingsData(updatedSettings);
+        setUser(prev => ({ ...prev, ...updatedSettings, profileImage: updatedSettings.profilePicture }));
+        alert("✅ Settings updated successfully!");
+        setShowSettingsModal(false);
+      } else {
+        throw new Error(response.data.message || "Failed to update settings");
+      }
+    } catch (error) {
+      console.error("Failed to update settings:", error);
+      alert("❌ Failed to update settings: " + (error.response?.data?.message || error.message));
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && showSettingsModal) {
+        setShowSettingsModal(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [showSettingsModal]);
+
+  return (
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4"
+      onClick={() => setShowSettingsModal(false)}
+    >
+      <div 
+        className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto relative"
+        onClick={(e) => e.stopPropagation()}
+        ref={settingsModalRef}
+      >
+        <div className="flex justify-between items-center p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Settings</h2>
+          <button 
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+            onClick={() => setShowSettingsModal(false)}
+            type="button"
+          >
+            <FaTimes className="w-6 h-6" />
+          </button>
+        </div>
+
+        <div className="p-6">
+          {/* Profile Section */}
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Profile Information</h3>
+            
+            {/* Profile Picture */}
+            <div className="flex items-center space-x-6 mb-6">
+              <div className="relative">
+                <img 
+                  src={settingsData.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(localName)}&background=203a43&color=fff`}
+                  alt="Profile"
+                  className="w-20 h-20 rounded-full border-2 border-gray-300"
+                />
+                <label htmlFor="profile-picture" className="absolute bottom-0 right-0 bg-blue-600 text-white p-1 rounded-full cursor-pointer hover:bg-blue-700 transition-colors">
+                  <FaEdit className="w-3 h-3" />
+                  <input
+                    id="profile-picture"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleProfilePictureUpload}
+                  />
+                </label>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Click the edit icon to change your profile picture</p>
+              </div>
+            </div>
+
+            {/* Name and Email Inputs - COMPLETELY FIXED */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  value={localName}
+                  onChange={handleNameChange}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') e.stopPropagation();
+                  }}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  placeholder="Enter your full name"
+                  autoComplete="name"
+                  onFocus={(e) => e.stopPropagation()}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  value={localEmail}
+                  onChange={handleEmailChange}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') e.stopPropagation();
+                  }}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  placeholder="Enter your email"
+                  autoComplete="email"
+                  onFocus={(e) => e.stopPropagation()}
+                />
+              </div>
+            </div>
+          </div>
+          
+          {/* Account Settings */}
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Account Settings</h3>
+            
+            <div className="space-y-3">
+              <button 
+                type="button"
+                className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onClick={() => {
+                  setShowSettingsModal(false);
+                  setShowChangePasswordModal(true);
+                }}
+                onFocus={(e) => e.stopPropagation()}
+              >
+                <p className="font-medium text-gray-900">Change Password</p>
+                <p className="text-sm text-gray-600">Update your password regularly</p>
+              </button>
+              
+              <button 
+                type="button"
+                className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onClick={() => alert("Privacy Settings feature coming soon!")}
+                onFocus={(e) => e.stopPropagation()}
+              >
+                <p className="font-medium text-gray-900">Privacy Settings</p>
+                <p className="text-sm text-gray-600">Manage your privacy preferences</p>
+              </button>
+              
+              <button 
+                type="button"
+                className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onClick={() => alert("Connected Accounts feature coming soon!")}
+                onFocus={(e) => e.stopPropagation()}
+              >
+                <p className="font-medium text-gray-900">Connected Accounts</p>
+                <p className="text-sm text-gray-600">Manage linked social accounts</p>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end space-x-3 p-6 border-t border-gray-200 bg-gray-50">
+          <button
+            type="button"
+            onClick={() => setShowSettingsModal(false)}
+            className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onFocus={(e) => e.stopPropagation()}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={savingSettings || !localName.trim() || !localEmail.trim()}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onFocus={(e) => e.stopPropagation()}
+          >
+            <FaSave className="w-4 h-4" />
+            <span>{savingSettings ? "Saving..." : "Save Changes"}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+  // ===== CHANGE PASSWORD MODAL COMPONENT (ADDED) =====
+  const ChangePasswordModal = () => {
+    if (!showChangePasswordModal) return null;
+
+    const handlePasswordChange = (e) => {
+      const { name, value } = e.target;
+      setPasswordData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    };
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      
+      // Validate passwords
+      if (passwordData.newPassword !== passwordData.confirmPassword) {
+        alert("New passwords don't match!");
+        return;
+      }
+      
+      if (passwordData.newPassword.length < 8) {
+        alert("Password must be at least 8 characters long!");
+        return;
+      }
+      
+      if (passwordData.currentPassword === passwordData.newPassword) {
+        alert("New password must be different from current password!");
+        return;
+      }
+
+      setChangingPassword(true);
+      try {
+        const response = await api.put("/auth/change-password", {
+          currentPassword: passwordData.currentPassword,
+          newPassword: passwordData.newPassword
+        });
+
+        if (response.data.success) {
+          alert("✅ Password changed successfully!");
+          setShowChangePasswordModal(false);
+          setPasswordData({
+            currentPassword: '',
+            newPassword: '',
+            confirmPassword: ''
+          });
+        } else {
+          throw new Error(response.data.message || "Failed to change password");
+        }
+      } catch (error) {
+        console.error("Failed to change password:", error);
+        alert("❌ Failed to change password: " + (error.response?.data?.message || error.message));
+      } finally {
+        setChangingPassword(false);
+      }
     };
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" ref={settingsModalRef}>
-          <div className="flex justify-between items-center p-6 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900">Settings</h2>
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000] p-4">
+        <div 
+          className="bg-white rounded-lg shadow-xl max-w-md w-full p-6"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-semibold text-gray-900">Change Password</h2>
             <button 
               className="text-gray-400 hover:text-gray-600 transition-colors"
-              onClick={() => setShowSettingsModal(false)}
+              onClick={() => {
+                setShowChangePasswordModal(false);
+                setPasswordData({
+                  currentPassword: '',
+                  newPassword: '',
+                  confirmPassword: ''
+                });
+              }}
             >
               <FaTimes className="w-6 h-6" />
             </button>
           </div>
 
-          <div className="p-6">
-            {/* Profile Section */}
-            <div className="mb-8">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Profile Information</h3>
-              
-              {/* Profile Picture */}
-              <div className="flex items-center space-x-6 mb-6">
-                <div className="relative">
-                  <img 
-                    src={settingsData.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(settingsData.name)}&background=203a43&color=fff`}
-                    alt="Profile"
-                    className="w-20 h-20 rounded-full border-2 border-gray-300"
-                  />
-                  <label htmlFor="profile-picture" className="absolute bottom-0 right-0 bg-blue-600 text-white p-1 rounded-full cursor-pointer hover:bg-blue-700 transition-colors">
-                    <FaEdit className="w-3 h-3" />
-                    <input
-                      id="profile-picture"
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleProfilePictureUpload}
-                    />
-                  </label>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Click the edit icon to change your profile picture</p>
-                </div>
+          <form onSubmit={handleSubmit}>
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Current Password
+                </label>
+                <input
+                  type="password"
+                  name="currentPassword"
+                  value={passwordData.currentPassword}
+                  onChange={handlePasswordChange}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Enter current password"
+                  required
+                  autoComplete="current-password"
+                />
               </div>
 
-              {/* Name and Email - FIXED INPUTS */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Full Name
-                  </label>
-                  <input
-                    ref={nameInputRef}
-                    type="text"
-                    value={settingsData.name}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      handleSettingsInputChange('name', e.target.value);
-                    }}
-                    onFocus={handleInputFocus}
-                    onBlur={handleInputBlur}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 focus:outline-none"
-                    placeholder="Enter your full name"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email Address
-                  </label>
-                  <input
-                    ref={emailInputRef}
-                    type="email"
-                    value={settingsData.email}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      handleSettingsInputChange('email', e.target.value);
-                    }}
-                    onFocus={handleInputFocus}
-                    onBlur={handleInputBlur}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 focus:outline-none"
-                    placeholder="Enter your email"
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  New Password
+                </label>
+                <input
+                  type="password"
+                  name="newPassword"
+                  value={passwordData.newPassword}
+                  onChange={handlePasswordChange}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Enter new password"
+                  required
+                  autoComplete="new-password"
+                  minLength="8"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Must be at least 8 characters with uppercase, lowercase, number, and special character
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Confirm New Password
+                </label>
+                <input
+                  type="password"
+                  name="confirmPassword"
+                  value={passwordData.confirmPassword}
+                  onChange={handlePasswordChange}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Confirm new password"
+                  required
+                  autoComplete="new-password"
+                  minLength="8"
+                />
+                {passwordData.newPassword && passwordData.confirmPassword && 
+                 passwordData.newPassword !== passwordData.confirmPassword && (
+                  <p className="text-xs text-red-600 mt-1">Passwords don't match!</p>
+                )}
               </div>
             </div>
 
-            {/* Account Settings */}
-            <div className="mb-8">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Account Settings</h3>
-              
-              <div className="space-y-3">
-                <button 
-                  className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  onClick={() => alert("Change Password feature coming soon!")}
-                >
-                  <p className="font-medium text-gray-900">Change Password</p>
-                  <p className="text-sm text-gray-600">Update your password regularly</p>
-                </button>
-                
-                <button 
-                  className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  onClick={() => alert("Privacy Settings feature coming soon!")}
-                >
-                  <p className="font-medium text-gray-900">Privacy Settings</p>
-                  <p className="text-sm text-gray-600">Manage your privacy preferences</p>
-                </button>
-                
-                <button 
-                  className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  onClick={() => alert("Connected Accounts feature coming soon!")}
-                >
-                  <p className="font-medium text-gray-900">Connected Accounts</p>
-                  <p className="text-sm text-gray-600">Manage linked social accounts</p>
-                </button>
-              </div>
+            <div className="flex justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowChangePasswordModal(false);
+                  setPasswordData({
+                    currentPassword: '',
+                    newPassword: '',
+                    confirmPassword: ''
+                  });
+                }}
+                className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={changingPassword || 
+                         !passwordData.currentPassword || 
+                         !passwordData.newPassword || 
+                         !passwordData.confirmPassword ||
+                         passwordData.newPassword !== passwordData.confirmPassword ||
+                         passwordData.newPassword.length < 8}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {changingPassword ? "Changing..." : "Change Password"}
+              </button>
             </div>
-          </div>
-
-          <div className="flex justify-end space-x-3 p-6 border-t border-gray-200 bg-gray-50">
-            <button
-              onClick={() => setShowSettingsModal(false)}
-              className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSaveSettings}
-              disabled={savingSettings || !settingsData.name.trim() || !settingsData.email.trim()}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <FaSave className="w-4 h-4" />
-              <span>{savingSettings ? "Saving..." : "Save Changes"}</span>
-            </button>
-          </div>
+          </form>
         </div>
       </div>
     );
@@ -3426,13 +3691,7 @@ export default function Dashboard() {
             displayExams.map((exam) => renderExamCard(exam))
           ) : (
             <div className="no-exams-message">
-              <div className="no-exams-icon">🎥</div>
-              <h3>No live classes yet</h3>
-              <p>
-                {selectedClass?.userRole === "teacher" 
-                  ? "Create a live class to get started. Your students will be able to join when you start the session."
-                  : "No live classes have been scheduled yet. Check back later or ask your teacher."}
-              </p>
+             
             </div>
           )}
         </div>
@@ -3691,17 +3950,17 @@ export default function Dashboard() {
     </div>
   );
 
-  // Settings content renderer
+  // ✅ UPDATED: Settings content renderer - SIMPLIFIED
   const renderSettingsContent = () => (
     <div className="settings-view">
       <div className="settings-header">
         <h2>Settings</h2>
-        <p>Manage your account and notification preferences</p>
+        <p>Manage your account preferences</p>
       </div>
       <div className="settings-sections">
         <div className="settings-section">
           <h3>Account Settings</h3>
-          <p className="settings-description">Manage your account information and preferences</p>
+          <p className="settings-description">Manage your account information</p>
           <div className="settings-item">
             <div className="settings-item-content">
               <h4>Profile Information</h4>
@@ -3715,49 +3974,10 @@ export default function Dashboard() {
             </button>
           </div>
           
-          <div className="settings-item">
-            <div className="settings-item-content">
-              <h4>Privacy & Security</h4>
-              <p>Manage your privacy settings and security options</p>
-            </div>
-            <button 
-              className="settings-btn"
-              onClick={handleManageSettings}
-            >
-              Manage
-            </button>
-          </div>
+          {/* ✅ REMOVED: Privacy & Security from Account Settings */}
         </div>
         
-        <div className="settings-section">
-          <h3>Application Settings</h3>
-          <p className="settings-description">Customize your application experience</p>
-          <div className="settings-item">
-            <div className="settings-item-content">
-              <h4>Theme & Appearance</h4>
-              <p>Change the look and feel of the application</p>
-            </div>
-            <button 
-              className="settings-btn"
-              onClick={handleManageSettings}
-            >
-              Manage
-            </button>
-          </div>
-          
-          <div className="settings-item">
-            <div className="settings-item-content">
-              <h4>Language & Region</h4>
-              <p>Set your preferred language and regional settings</p>
-            </div>
-            <button 
-              className="settings-btn"
-              onClick={handleManageSettings}
-            >
-              Manage
-            </button>
-          </div>
-        </div>
+        {/* ✅ REMOVED: Entire Application Settings section */}
       </div>
     </div>
   );
@@ -3836,32 +4056,27 @@ export default function Dashboard() {
     );
   };
 
-  // ✅ ADDED: JOIN CLASS MODAL COMPONENT
   // ✅ FIXED: JoinModal Component without auto-selection
 const JoinModal = () => {
   if (!showJoinModal) return null;
 
   const inputRef = useRef(null);
   
-  // ✅ REMOVED: Auto-focus and select on modal open
   useEffect(() => {
     if (showJoinModal && inputRef.current) {
       setTimeout(() => {
         inputRef.current?.focus();
-        // ✅ FIXED: Don't select all text, just move cursor to end
         const length = inputRef.current.value.length;
         inputRef.current.setSelectionRange(length, length);
       }, 100);
     }
   }, [showJoinModal]);
 
-  // ✅ SIMPLIFIED: Handle input change
   const handleInputChange = (e) => {
     const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
     setJoinCode(value);
   };
 
-  // ✅ SIMPLIFIED: Handle form submission
   const handleSubmit = (e) => {
     e.preventDefault();
     if (joinCode.trim().length === 6) {
@@ -4592,155 +4807,153 @@ const JoinModal = () => {
       <main className="dashboard-main">
         {/* SIDEBAR NAVIGATION */}
         <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`} ref={sidebarRef}>
-          <nav className="sidebar-nav">
-            <button 
-              className={`sidebar-item ${activeSidebar === 'home' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveSidebar('home');
-                setSelectedClass(null);
-              }}
+  <nav className="sidebar-nav">
+    <button 
+      className={`sidebar-item ${activeSidebar === 'home' ? 'active' : ''}`}
+      onClick={() => {
+        setActiveSidebar('home');
+        setSelectedClass(null);
+      }}
+    >
+      <FaHome className="sidebar-icon" />
+      <span className="sidebar-text">Home</span>
+    </button>
+    
+    <button 
+      className={`sidebar-item ${activeSidebar === 'calendar' ? 'active' : ''}`}
+      onClick={() => setActiveSidebar('calendar')}
+    >
+      <FaCalendarAlt className="sidebar-icon" />
+      <span className="sidebar-text">Calendar</span>
+    </button>
+    
+    {/* TEACHING CLASSES SECTION */}
+    {userRole === "teacher" && (
+      <>
+        {teachingClasses.length > 0 ? (
+          <>
+            <div 
+              className="section-header dropdown-header"
+              onClick={() => setTeachingDropdownOpen(!teachingDropdownOpen)}
             >
-              <FaHome className="sidebar-icon" />
-              <span className="sidebar-text">Home</span>
-            </button>
+              <span>CLASS </span>
+              <span className={`dropdown-arrow ${teachingDropdownOpen ? 'open' : ''}`}>
+                <FaChevronLeft />
+              </span>
+            </div>
             
-            <button 
-              className={`sidebar-item ${activeSidebar === 'calendar' ? 'active' : ''}`}
-              onClick={() => setActiveSidebar('calendar')}
-            >
-              <FaCalendarAlt className="sidebar-icon" />
-              <span className="sidebar-text">Calendar</span>
-            </button>
-            
-            
-            {/* TEACHING CLASSES SECTION */}
-            {userRole === "teacher" && (
-              <>
-                {teachingClasses.length > 0 ? (
-                  <>
-                    <div 
-                      className="section-header dropdown-header"
-                      onClick={() => setTeachingDropdownOpen(!teachingDropdownOpen)}
+            {teachingDropdownOpen && (
+              <div className="teaching-dropdown">
+                <div className="teaching-classes-list">
+                  {teachingClasses.map((classData) => (
+                    <div
+                      key={classData._id}
+                      className={`class-list-item ${selectedClass?._id === classData._id ? 'selected' : ''}`}
+                      onClick={() => handleSelectClass(classData)}
                     >
-                      <span>CLASS </span>
-                      <span className={`dropdown-arrow ${teachingDropdownOpen ? 'open' : ''}`}>
-                        <FaChevronLeft />
-                      </span>
-                    </div>
-                    
-                    {teachingDropdownOpen && (
-                      <div className="teaching-dropdown">
-                        <div className="teaching-classes-list">
-                          {teachingClasses.map((classData) => (
-                            <div
-                              key={classData._id}
-                              className={`class-list-item ${selectedClass?._id === classData._id ? 'selected' : ''}`}
-                              onClick={() => handleSelectClass(classData)}
-                            >
-                              <div className={`class-avatar ${getRandomColor()}`}>
-                                {classData.name.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="class-info">
-                                <span className="class-name">{classData.name}</span>
-                                <span className="class-details">{classData.section || classData.code}</span>
-                              </div>
-                              <span className="role-badge teacher">Teacher</span>
-                            </div>
-                          ))}
-                        </div>
+                      <div className={`class-avatar ${getRandomColor()}`}>
+                        {classData.name.charAt(0).toUpperCase()}
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="empty-teaching-section">
-                    <p className="empty-teaching-text">You're not teaching any classes yet</p>
-                    <button 
-                      className="create-class-sidebar-btn"
-                      onClick={() => setShowCreateModal(true)}
-                    >
-                      Create Class
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-            
-          {/* ENROLLED CLASSES SECTION - FIXED BACKGROUND COLOR */}
-          {userRole === "student" && enrolledClasses.length > 0 && (
-            <>
-              <div 
-                className="section-header dropdown-header"
-                onClick={() => setEnrolledDropdownOpen(!enrolledDropdownOpen)}
-              >
-                <span>ENROLLED ({enrolledClasses.length})</span>
-                <span className={`dropdown-arrow ${enrolledDropdownOpen ? 'open' : ''}`}>
-                  <FaChevronLeft />
-                </span>
-              </div>
-              
-              {enrolledDropdownOpen && (
-                <div className="enrolled-dropdown">
-                  <div className="enrolled-classes-list">
-                    {enrolledClasses.slice(0, 8).map((classData) => {
-                      // Get the first letter of your name for the avatar
-                      const userInitial = user.name ? user.name.charAt(0).toUpperCase() : 'S';
-                      // Get a consistent color for this class
-                      const classColor = getRandomColor();
-                      
-                      return (
-                        <div
-                          key={classData._id}
-                          className={`class-list-item ${selectedClass?._id === classData._id ? 'selected' : ''}`}
-                          onClick={() => handleSelectClass(classData)}
-                        >
-                          <div className={`class-avatar ${classColor}`}>
-                            {classData.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="class-info">
-                            <span className="class-name">{classData.name}</span>
-                            <span className="class-details">{classData.ownerId?.name || 'Teacher'}</span>
-                          </div>
-                          <span className="role-badge student">Student</span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                      <div className="class-info">
+                        <span className="class-name">{classData.name}</span>
+                        <span className="class-details">{classData.section || classData.code}</span>
+                      </div>
+                      <span className="role-badge teacher">Teacher</span>
+                    </div>
+                  ))}
                 </div>
-              )}
-            </>
-          )}
-            
-            {userRole === "student" && enrolledClasses.length === 0 && (
-              <div className="empty-sidebar-section">
-                <p className="empty-sidebar-text">You haven't enrolled in any classes yet</p>
-                <button 
-                  className="create-class-sidebar-btn"
-                  onClick={() => setShowJoinModal(true)}
-                >
-                  Join Class
-                </button>
               </div>
             )}
-            
-            
-            
+          </>
+        ) : (
+          <div className="empty-teaching-section">
+            <p className="empty-teaching-text">You're not teaching any classes yet</p>
             <button 
-              className={`sidebar-item ${activeSidebar === 'archived' ? 'active' : ''}`}
-              onClick={() => setActiveSidebar('archived')}
+              className="create-class-sidebar-btn"
+              onClick={() => setShowCreateModal(true)}
             >
-              <FaArchive className="sidebar-icon" />
-              <span className="sidebar-text">Archived Classes</span>
+              Create Class
             </button>
-            
-            <button 
-              className={`sidebar-item ${activeSidebar === 'settings' ? 'active' : ''}`}
-              onClick={() => setActiveSidebar('settings')}
-            >
-              <FaCog className="sidebar-icon" />
-              <span className="sidebar-text">Settings</span>
-            </button>
-          </nav>
-        </aside>
+          </div>
+        )}
+      </>
+    )}
+    
+    {/* ENROLLED CLASSES SECTION - FIXED BACKGROUND COLOR */}
+    {userRole === "student" && enrolledClasses.length > 0 && (
+      <>
+        <div 
+          className="section-header dropdown-header"
+          onClick={() => setEnrolledDropdownOpen(!enrolledDropdownOpen)}
+        >
+          <span>ENROLLED ({enrolledClasses.length})</span>
+          <span className={`dropdown-arrow ${enrolledDropdownOpen ? 'open' : ''}`}>
+            <FaChevronLeft />
+          </span>
+        </div>
+        
+        {enrolledDropdownOpen && (
+          <div className="enrolled-dropdown">
+            <div className="enrolled-classes-list">
+              {enrolledClasses.slice(0, 8).map((classData) => {
+                const userInitial = user.name ? user.name.charAt(0).toUpperCase() : 'S';
+                const classColor = getRandomColor();
+                
+                return (
+                  <div
+                    key={classData._id}
+                    className={`class-list-item ${selectedClass?._id === classData._id ? 'selected' : ''}`}
+                    onClick={() => handleSelectClass(classData)}
+                  >
+                    <div className={`class-avatar ${classColor}`}>
+                      {classData.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="class-info">
+                      <span className="class-name">{classData.name}</span>
+                      <span className="class-details">{classData.ownerId?.name || 'Teacher'}</span>
+                    </div>
+                    <span className="role-badge student">Student</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </>
+    )}
+    
+    {userRole === "student" && enrolledClasses.length === 0 && (
+      <div className="empty-sidebar-section">
+        <p className="empty-sidebar-text">You haven't enrolled in any classes yet</p>
+        <button 
+          className="create-class-sidebar-btn"
+          onClick={() => setShowJoinModal(true)}
+        >
+          Join Class
+        </button>
+      </div>
+    )}
+    
+    {/* ARCHIVED CLASSES - ONLY FOR TEACHERS */}
+    {userRole === "teacher" && (
+      <button 
+        className={`sidebar-item ${activeSidebar === 'archived' ? 'active' : ''}`}
+        onClick={() => setActiveSidebar('archived')}
+      >
+        <FaArchive className="sidebar-icon" />
+        <span className="sidebar-text">Archived Classes</span>
+      </button>
+    )}
+    
+    <button 
+      className={`sidebar-item ${activeSidebar === 'settings' ? 'active' : ''}`}
+      onClick={() => setActiveSidebar('settings')}
+    >
+      <FaCog className="sidebar-icon" />
+      <span className="sidebar-text">Settings</span>
+    </button>
+  </nav>
+</aside>
 
         {/* MAIN CONTENT AREA */}
         <div className={`main-content ${sidebarOpen ? '' : 'expanded'}`}>
@@ -4758,6 +4971,9 @@ const JoinModal = () => {
       <RestoreModal />
       <SettingsModal />
       <DeleteConfirmationModal />
+      
+      {/* ✅ ADDED: Change Password Modal */}
+      <ChangePasswordModal />
 
       {/* ✅ ADDED: Violation Summary Modal */}
       {showViolationSummary && selectedExamForSummary && (

@@ -1,4 +1,4 @@
-// /Frontend/src/lib/cameraManager.js - FIXED VERSION
+// /Frontend/src/lib/cameraManager.js - SIMPLIFIED FIXED VERSION
 class CameraManager {
   constructor() {
     this.stream = null;
@@ -6,122 +6,180 @@ class CameraManager {
     this.isInitialized = false;
     this.isCameraOn = true;
     this.lastError = null;
+    this.pendingPromise = null; // To prevent multiple simultaneous requests
   }
 
   async initializeCamera() {
     console.log('🎥 [DEBUG] initializeCamera called');
     
-    // If already have stream, return it
+    // If already have active stream, return it
     if (this.stream && this.stream.active) {
-      console.log('✅ [DEBUG] Using existing camera stream');
+      console.log('✅ [DEBUG] Using existing active camera stream');
       this.attachToAllElements();
       return this.stream;
     }
 
+    // If we're already trying to initialize, return the pending promise
+    if (this.pendingPromise) {
+      console.log('⏳ [DEBUG] Camera initialization already in progress');
+      return this.pendingPromise;
+    }
+
     try {
-      console.log('🎥 [DEBUG] Requesting camera access...');
+      // Create pending promise
+      this.pendingPromise = this._getCameraStream();
+      const stream = await this.pendingPromise;
       
-      // Stop any existing stream
-      this.cleanup();
-
-      // FIRST: Check available devices
-      console.log('🔍 [DEBUG] Checking available devices...');
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const cameras = devices.filter(device => device.kind === 'videoinput');
-      console.log('📷 [DEBUG] Available cameras:', cameras);
-
-      if (cameras.length === 0) {
-        throw new Error('No camera found on this device');
-      }
-
-      // Get camera with SIMPLE constraints
-      console.log('🎯 [DEBUG] Requesting camera with constraints...');
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { min: 320, ideal: 640, max: 1280 },
-          height: { min: 240, ideal: 480, max: 720 },
-          facingMode: 'user'
-        },
-        audio: false
-      });
-
-      console.log('✅ [DEBUG] Camera access granted');
-      console.log('📹 [DEBUG] Stream tracks:', this.stream.getTracks().length);
-      
-      const videoTrack = this.stream.getVideoTracks()[0];
-      if (videoTrack) {
-        console.log('📹 [DEBUG] Video track settings:', videoTrack.getSettings());
-      }
-
+      this.stream = stream;
       this.isInitialized = true;
       this.isCameraOn = true;
       this.lastError = null;
+      
+      console.log('✅ [DEBUG] Camera initialized successfully');
+      console.log('📹 [DEBUG] Stream active:', stream.active);
+      console.log('📹 [DEBUG] Video tracks:', stream.getVideoTracks().length);
+      
       this.attachToAllElements();
+      return stream;
       
-      return this.stream;
-
     } catch (error) {
-      console.error('❌ [DEBUG] Camera access failed:', error);
-      console.error('❌ [DEBUG] Error name:', error.name);
-      console.error('❌ [DEBUG] Error message:', error.message);
-      
+      console.error('❌ [DEBUG] Camera initialization failed:', error);
       this.stream = null;
       this.isInitialized = false;
       this.lastError = error;
-      
-      let errorMessage = 'Camera access failed';
-      if (error.name === 'NotAllowedError') {
-        errorMessage = 'Camera permission denied. Please allow camera access in browser settings.';
-      } else if (error.name === 'NotFoundError') {
-        errorMessage = 'No camera found. Please connect a camera.';
-      } else if (error.name === 'NotReadableError') {
-        errorMessage = 'Camera is busy. Close other camera apps.';
-      } else if (error.name === 'OverconstrainedError') {
-        errorMessage = 'Camera constraints could not be met. Trying alternative...';
-        // Try with even simpler constraints
-        return this.initializeCameraWithSimpleConstraints();
-      }
-      
-      throw new Error(errorMessage);
+      throw error;
+    } finally {
+      this.pendingPromise = null;
     }
   }
 
-  async initializeCameraWithSimpleConstraints() {
+  async _getCameraStream() {
+    console.log('🎥 [DEBUG] Requesting camera access...');
+    
     try {
-      console.log('🔄 [DEBUG] Trying simple constraints...');
+      // Clean up any existing stream
+      this._cleanupStream();
       
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: true, // Simplest possible
-        audio: false
-      });
+      // Get available cameras first
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter(device => device.kind === 'videoinput');
+      console.log('📷 [DEBUG] Available cameras:', cameras.map(c => ({ id: c.deviceId, label: c.label })));
 
-      console.log('✅ [DEBUG] Simple constraints worked');
-      this.isInitialized = true;
-      this.isCameraOn = true;
-      this.lastError = null;
-      this.attachToAllElements();
+      if (cameras.length === 0) {
+        throw new Error('No camera found on this device. Please connect a webcam.');
+      }
+
+      // Try with ideal constraints first
+      const constraints = {
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: 'user'
+        },
+        audio: false
+      };
+
+      console.log('🎯 [DEBUG] Requesting camera with constraints:', constraints);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
-      return this.stream;
+      if (!stream) {
+        throw new Error('Camera stream is null');
+      }
+      
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        const settings = videoTrack.getSettings();
+        console.log('📹 [DEBUG] Camera settings:', settings);
+        console.log('📹 [DEBUG] Video track ready:', videoTrack.readyState);
+        console.log('📹 [DEBUG] Video track enabled:', videoTrack.enabled);
+      }
+      
+      return stream;
+      
     } catch (error) {
-      console.error('❌ [DEBUG] Simple constraints also failed:', error);
+      console.error('❌ [DEBUG] Camera access error:', error.name, error.message);
+      
+      // Try with simpler constraints if first attempt fails
+      if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
+        console.log('🔄 [DEBUG] Trying simpler constraints...');
+        try {
+          const simpleStream = await navigator.mediaDevices.getUserMedia({
+            video: true, // Let browser choose defaults
+            audio: false
+          });
+          return simpleStream;
+        } catch (simpleError) {
+          console.error('❌ [DEBUG] Simple constraints also failed:', simpleError);
+          throw simpleError;
+        }
+      }
+      
       throw error;
     }
   }
 
   attachVideoElement(videoElement) {
-    if (!videoElement || typeof videoElement !== 'object') {
-      console.error('❌ [DEBUG] Invalid video element');
+    if (!videoElement || !(videoElement instanceof HTMLVideoElement)) {
+      console.error('❌ [DEBUG] Invalid video element provided');
       return false;
     }
     
-    console.log('📹 [DEBUG] Attaching video element');
+    console.log('📹 [DEBUG] Adding video element to manager');
     this.videoElements.add(videoElement);
     
+    // If we have an active stream, attach it immediately
     if (this.stream && this.stream.active) {
-      console.log('🔗 [DEBUG] Stream is active, attaching...');
       return this.attachStreamToElement(videoElement);
-    } else {
-      console.log('⚠️ [DEBUG] No active stream to attach');
+    }
+    
+    return false;
+  }
+
+  attachStreamToElement(videoElement) {
+    if (!videoElement || !this.stream) {
+      console.error('❌ [DEBUG] Cannot attach: missing video element or stream');
+      return false;
+    }
+    
+    try {
+      console.log('🔗 [DEBUG] Attaching stream to video element');
+      
+      // Clear any existing stream first
+      if (videoElement.srcObject) {
+        videoElement.srcObject = null;
+      }
+      
+      // Set the new stream
+      videoElement.srcObject = this.stream;
+      
+      // Force video properties
+      videoElement.muted = true;
+      videoElement.playsInline = true;
+      videoElement.style.transform = 'scaleX(-1)';
+      videoElement.style.objectFit = 'cover';
+      videoElement.style.backgroundColor = '#000';
+      
+      console.log('▶️ [DEBUG] Starting video playback...');
+      
+      // Play the video
+      const playPromise = videoElement.play();
+      
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          console.log('✅ [DEBUG] Video is playing');
+          console.log('📹 [DEBUG] Video readyState:', videoElement.readyState);
+          console.log('📹 [DEBUG] Video width:', videoElement.videoWidth);
+          console.log('📹 [DEBUG] Video height:', videoElement.videoHeight);
+        }).catch(error => {
+          console.warn('⚠️ [DEBUG] Video play was prevented:', error.message);
+          console.warn('⚠️ [DEBUG] This is normal if page is not focused');
+        });
+      }
+      
+      return true;
+      
+    } catch (error) {
+      console.error('❌ [DEBUG] Failed to attach stream to element:', error);
       return false;
     }
   }
@@ -130,6 +188,7 @@ class CameraManager {
     if (videoElement) {
       console.log('📹 [DEBUG] Detaching video element');
       this.videoElements.delete(videoElement);
+      
       if (videoElement.srcObject) {
         videoElement.srcObject = null;
       }
@@ -138,64 +197,25 @@ class CameraManager {
 
   attachToAllElements() {
     if (!this.stream || !this.stream.active) {
-      console.log('⚠️ [DEBUG] No active stream to attach to elements');
+      console.log('⚠️ [DEBUG] No active stream to attach');
       return;
     }
     
-    console.log(`📹 [DEBUG] Attaching to ${this.videoElements.size} video elements`);
+    console.log(`📹 [DEBUG] Attaching stream to ${this.videoElements.size} video elements`);
+    
     this.videoElements.forEach(videoElement => {
       this.attachStreamToElement(videoElement);
     });
   }
 
-  attachStreamToElement(videoElement) {
-    if (!videoElement || !this.stream) {
-      console.error('❌ [DEBUG] Missing video element or stream');
-      return false;
-    }
-    
-    try {
-      console.log('🔗 [DEBUG] Attaching stream to video element');
-      
-      // Clear any existing stream
-      if (videoElement.srcObject) {
-        videoElement.srcObject = null;
-      }
-      
-      // Set new stream
-      videoElement.srcObject = this.stream;
-      videoElement.style.transform = 'scaleX(-1)';
-      videoElement.style.objectFit = 'cover';
-      videoElement.style.backgroundColor = '#000';
-      
-      console.log('▶️ [DEBUG] Attempting to play video...');
-      
-      // Try to play the video
-      const playPromise = videoElement.play();
-      if (playPromise !== undefined) {
-        playPromise.then(() => {
-          console.log('✅ [DEBUG] Video playing successfully');
-        }).catch(error => {
-          console.warn('⚠️ [DEBUG] Video play blocked:', error.message);
-          
-          // Try again with user interaction
-          const tryPlayOnClick = () => {
-            videoElement.play().then(() => {
-              console.log('✅ [DEBUG] Video playing after click');
-            }).catch(e => {
-              console.warn('⚠️ [DEBUG] Still blocked after click');
-            });
-            document.removeEventListener('click', tryPlayOnClick);
-          };
-          
-          document.addEventListener('click', tryPlayOnClick);
-        });
-      }
-      
-      return true;
-    } catch (error) {
-      console.error('❌ [DEBUG] Failed to attach stream:', error);
-      return false;
+  _cleanupStream() {
+    if (this.stream) {
+      console.log('🧹 [DEBUG] Cleaning up old stream');
+      this.stream.getTracks().forEach(track => {
+        console.log(`🛑 [DEBUG] Stopping ${track.kind} track`);
+        track.stop();
+      });
+      this.stream = null;
     }
   }
 
@@ -203,23 +223,6 @@ class CameraManager {
     if (!this.stream) return null;
     const tracks = this.stream.getVideoTracks();
     return tracks.length > 0 ? tracks[0] : null;
-  }
-
-  toggleCamera(enabled) {
-    const track = this.getVideoTrack();
-    if (track) {
-      track.enabled = enabled;
-      this.isCameraOn = enabled;
-      console.log(`📹 [DEBUG] Camera ${enabled ? 'ON' : 'OFF'}`);
-      return enabled;
-    }
-    console.log(`📹 [DEBUG] No track to toggle`);
-    return false;
-  }
-
-  isActive() {
-    const track = this.getVideoTrack();
-    return track ? track.enabled : false;
   }
 
   isStreamAvailable() {
@@ -231,16 +234,9 @@ class CameraManager {
   }
 
   cleanup() {
-    console.log('🧹 [DEBUG] Cleaning up camera manager');
+    console.log('🧹 [DEBUG] Cleaning up camera manager completely');
     
-    if (this.stream) {
-      console.log('🛑 [DEBUG] Stopping stream tracks');
-      this.stream.getTracks().forEach(track => {
-        console.log(`🛑 [DEBUG] Stopping ${track.kind} track`);
-        track.stop();
-      });
-      this.stream = null;
-    }
+    this._cleanupStream();
     
     this.videoElements.forEach(videoElement => {
       if (videoElement && videoElement.srcObject) {
@@ -252,7 +248,9 @@ class CameraManager {
     this.isInitialized = false;
     this.isCameraOn = false;
     this.lastError = null;
+    this.pendingPromise = null;
   }
 }
 
+// Export a single instance
 export default new CameraManager();
